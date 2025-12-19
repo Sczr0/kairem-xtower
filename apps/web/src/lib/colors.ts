@@ -15,25 +15,24 @@ export type ColorId = (typeof Color)[keyof typeof Color];
 export function colorToCss(color: ColorId): string {
 	switch (color) {
 		case Color.Red:
-			return '#ef4444';
+			return 'var(--c-red)';
 		case Color.Blue:
-			return '#3b82f6';
+			return 'var(--c-blue)';
 		case Color.Black:
-			return '#0f172a';
+			return 'var(--c-black)';
 		case Color.Green:
-			return '#22c55e';
+			return 'var(--c-green)';
 		case Color.Yellow:
-			return '#eab308';
+			return 'var(--c-yellow)';
 		case Color.Purple:
-			return '#a855f7';
+			return 'var(--c-purple)';
 		case Color.White:
-			return '#f8fafc';
+			return 'var(--c-white)';
 		case Color.Orange:
-			return '#f97316';
+			return 'var(--c-orange)';
 		case Color.Cyan:
-			return '#06b6d4';
+			return 'var(--c-cyan)';
 		default:
-			return '#94a3b8';
+			return 'var(--c-unknown)';
 	}
 }
-

@@ -3,12 +3,13 @@
 <script lang="ts">
 	import Matrix from '$lib/components/Matrix.svelte';
 	import RuleCard, { type Rule as UiRule } from '$lib/components/RuleCard.svelte';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import rules from '$lib/rules.json';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
-	import { loadEngine, type Engine, type ValidateResult } from '$lib/wasm/load';
+	import { loadEngine, type DifficultyReport, type Engine, type ValidateResult } from '$lib/wasm/load';
 	import { browser, dev } from '$app/environment';
 	import { onMount } from 'svelte';
-    import { fade, slide } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
 
 	// --- 逻辑部分保持不变 ---
 	let engine: Engine | null = null;
@@ -28,7 +29,10 @@
 	let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	let checkedMask = 0;
 	let validate: ValidateResult | null = null;
+	let difficulty: DifficultyReport | null = null;
 	let hoveredRuleId: string | null = null;
+	let activeCellIndex: number | null = null;
+	let allRulesOpen = false;
 
 	type Rule = UiRule;
 	const allRules = (rules.rules ?? []) as Rule[];
@@ -152,9 +156,19 @@
 		validate = engine.validate_state(checkedMask >>> 0, new Uint8Array(grid));
 	}
 
+	function refreshDifficulty() {
+		if (!engine) return;
+		try {
+			difficulty = engine.difficulty_report(new Uint8Array(grid));
+		} catch {
+			difficulty = null;
+		}
+	}
+
 	function focusRuleByIndex(i: number) {
 		const color = grid[i];
 		hoveredRuleId = colorRuleMap[color] ?? null;
+		activeCellIndex = i;
 	}
 
 	function toggle(i: number) {
@@ -165,10 +179,7 @@
 	}
 
 	function handleHover(index: number | null) {
-		if (index === null) {
-			hoveredRuleId = null;
-			return;
-		}
+		if (index === null) return;
 		focusRuleByIndex(index);
 	}
 
@@ -179,7 +190,9 @@
 		grid = flattenGrid2d(grid2d);
 		checkedMask = blackMaskFromGrid(grid);
 		hoveredRuleId = null;
+		activeCellIndex = null;
 		refreshValidate();
+		refreshDifficulty();
 		if (opts.updateUrl) replaceUrlSeed(seed);
 	}
 
@@ -271,12 +284,14 @@
 			    <h1 class="logo">Kairem</h1>
 			    <p class="subtitle">轻量逻辑游戏</p>
             </div>
-            <!-- 移动端可以将 Action 放这里，或者保持在下面 -->
+			<div class="header-actions">
+				<ThemeToggle />
+			</div>
 		</header>
 
 		<div class="main-layout">
 			<!-- 左侧/上方：游戏主区域 -->
-			<main class="game-area">
+			<main class="card game-area">
                 
                 <!-- 工具栏：整合信息与操作 -->
 				<div class="toolbar">
@@ -285,6 +300,16 @@
 						<span class="info-value font-mono">
                             {puzzleKind === 'daily' ? (dateYmd || '—') : (seed ? shortSeed(seed) : '—')}
                         </span>
+						{#if difficulty}
+							<span
+								class="difficulty-chip"
+								title={`难度分=${difficulty.difficulty_score}`}
+							>
+								难度 {difficulty.difficulty_score}
+							</span>
+						{:else}
+							<span class="difficulty-chip difficulty-unknown" title="难度分未计算">难度 --</span>
+						{/if}
 					</div>
 
 					<div class="game-actions">
@@ -308,7 +333,7 @@
 
 				{#if shareManualVisible && shareUrlForManualCopy}
 					<div class="share-manual" transition:slide>
-						<input class="input-copy" readonly value={shareUrlForManualCopy} on:focus={selectAll} on:click={selectAll} />
+						<input class="input" readonly value={shareUrlForManualCopy} on:focus={selectAll} on:click={selectAll} />
 					</div>
 				{/if}
 
@@ -322,7 +347,6 @@
 						grid={grid}
 						checkedMask={checkedMask}
 						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
-						cellMessages={validate?.cell_messages ?? Array(25).fill(undefined)}
 						onToggle={toggle}
 						onHover={handleHover}
 					/>
@@ -348,13 +372,14 @@
 						<div class="debug-content">
 							<code>seed: {seed?.toString() ?? '—'}</code>
 							<code>mask: {checkedMask >>> 0}</code>
+							<code>difficulty: {difficulty ? `${difficulty.difficulty_score} (nodes=${difficulty.stats.node_visits})` : 'n/a'}</code>
 						</div>
 					</details>
 				{/if}
 			</main>
 
 			<!-- 右侧：规则与帮助 -->
-			<aside class="sidebar">
+			<aside class="card sidebar">
                 <!-- 1. 帮助移到这里，并设为折叠，节省空间 -->
                 <div class="sidebar-card help-section">
                     <details>
@@ -362,7 +387,7 @@
                         <ul class="help-list">
                             <li><strong>点击非黑格：</strong>切换勾选状态。</li>
                             <li><strong>黑格：</strong>已锁定，必须勾选。</li>
-                            <li><strong>红框/叹号：</strong>违反规则，悬停查看详情。</li>
+                            <li><strong>红框/叹号：</strong>违反规则，原因会显示在右侧“规则详情”里。</li>
                         </ul>
                     </details>
                 </div>
@@ -376,19 +401,33 @@
                         {/if}
 					</div>
 
-                    <!-- 动态高亮区域 -->
-					<div class="active-rule-section">
-						{#if hoveredRule}
-                            <div class="section-label">当前关注</div>
-							<div transition:slide={{ duration: 200 }}>
-                                <RuleCard rule={hoveredRule} color={ruleColorCss(hoveredRule.id)} highlighted />
-                            </div>
-						{:else}
-							<div class="empty-placeholder">
-                                <span>👆 移动鼠标查看规则</span>
-                            </div>
-						{/if}
-					</div>
+                    <!-- 动态高亮区域：当“全部规则”展开时隐藏，避免重复呈现造成不协调 -->
+					{#if !allRulesOpen}
+						<div class="active-rule-section">
+							{#if hoveredRule}
+								<div class="section-label">当前关注</div>
+								<div transition:slide={{ duration: 200 }}>
+									<RuleCard rule={hoveredRule} color={ruleColorCss(hoveredRule.id)} highlighted />
+								</div>
+							{:else}
+								<div class="empty-placeholder">
+									<span>移动鼠标查看规则</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					{#if validate && activeCellIndex !== null && !validate.cell_ok[activeCellIndex] && validate.cell_messages[activeCellIndex]}
+						<div class="cell-error-section">
+							<div class="section-label">冲突原因</div>
+							<div class="cell-error-box">
+								<div class="cell-error-meta">
+									格子 ({Math.floor(activeCellIndex / 5) + 1},{(activeCellIndex % 5) + 1})
+								</div>
+								<div class="cell-error-text">{validate.cell_messages[activeCellIndex]}</div>
+							</div>
+						</div>
+					{/if}
 
 					{#if goalRule}
 						<div class="static-rule-section">
@@ -397,13 +436,21 @@
 						</div>
 					{/if}
 
-					<details class="all-rules-details">
+					<details
+						class="all-rules-details"
+						on:toggle={(e) => (allRulesOpen = (e.currentTarget as HTMLDetailsElement).open)}
+					>
 						<summary>
 							全部规则 <span class="badge-count">{allRules.length}</span>
 						</summary>
 						<div class="rules-grid">
 							{#each allRules as r}
-								<RuleCard rule={r} color={ruleColorCss(r.id)} highlighted={hoveredRuleId === r.id} />
+								<RuleCard
+									rule={r}
+									color={ruleColorCss(r.id)}
+									highlighted={hoveredRuleId === r.id}
+									highlightTone="soft"
+								/>
 							{/each}
 						</div>
 					</details>
@@ -436,15 +483,18 @@
 		gap: 4px;
 	}
 
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
 	.logo {
-		font-size: 2rem;
+		font-size: 1.9rem;
 		font-weight: 900;
 		letter-spacing: -0.06em;
 		margin: 0;
-		background: linear-gradient(110deg, #38bdf8 0%, #a855f7 45%, #fb7185 100%);
-		-webkit-background-clip: text;
-		background-clip: text;
-		color: transparent;
+		color: var(--text);
 	}
 
 	.subtitle {
@@ -471,15 +521,7 @@
         }
 	}
 
-	/* Panels */
-	.game-area,
-	.sidebar {
-		background: var(--panel-2);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-xl);
-		box-shadow: var(--shadow-soft), var(--inset-highlight);
-	}
-
+	/* Panels（容器外观由全局 .card 统一提供） */
 	.game-area {
 		padding: 16px 16px 18px;
 	}
@@ -523,68 +565,36 @@
         color: var(--text);
     }
 
+	.difficulty-chip {
+		display: inline-flex;
+		align-items: center;
+		margin-left: 10px;
+		padding: 3px 10px;
+		border-radius: 999px;
+		font-size: 0.82rem;
+		font-weight: 750;
+		border: 1px solid var(--border);
+		background: var(--bg-2);
+		color: var(--muted);
+	}
+
+	.difficulty-unknown {
+		opacity: 0.8;
+	}
+
     .game-actions {
         display: flex;
         gap: 10px;
-    }
-
-    /* Buttons */
-    .btn {
-        appearance: none;
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        background: rgba(248, 250, 252, 0.06);
-        color: rgba(248, 250, 252, 0.92);
-        padding: 8px 14px;
-        border-radius: var(--radius-sm);
-        font-size: 0.9rem;
-        font-weight: 650;
-        cursor: pointer;
-        box-shadow: var(--inset-highlight);
-        transition:
-            background-color 120ms ease,
-            border-color 120ms ease,
-            transform 80ms ease;
-    }
-
-    .btn:hover:not(:disabled) {
-        background: rgba(248, 250, 252, 0.1);
-        border-color: rgba(148, 163, 184, 0.32);
-    }
-
-    .btn:active:not(:disabled) {
-        transform: translateY(1px);
-    }
-
-    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-    .btn-primary {
-        background: linear-gradient(110deg, #38bdf8 0%, #a855f7 60%, #fb7185 120%);
-        color: #070a14;
-        border-color: rgba(248, 250, 252, 0.08);
-    }
-    .btn-primary:hover:not(:disabled) {
-        border-color: rgba(248, 250, 252, 0.22);
-    }
-
-    .btn-ghost {
-        background: transparent;
-        border-color: transparent;
-        color: var(--muted);
-        box-shadow: none;
-    }
-    .btn-ghost:hover:not(:disabled) {
-        background: rgba(248, 250, 252, 0.06);
-        border-color: transparent;
     }
 
     /* Matrix Container */
     .matrix-wrapper {
         display: flex;
         justify-content: center;
-        background: linear-gradient(180deg, rgba(248, 250, 252, 0.05), rgba(248, 250, 252, 0.02));
+        background: var(--bg-2);
         padding: 18px;
         border-radius: var(--radius-xl);
-        border: 1px solid rgba(148, 163, 184, 0.24);
+        border: 1px solid var(--border);
         box-shadow: var(--inset-highlight), var(--inset-shadow);
     }
     
@@ -610,8 +620,8 @@
         border-radius: 99px;
         font-size: 0.9rem;
         font-weight: 650;
-        background: rgba(248, 250, 252, 0.06);
-        border: 1px solid rgba(148, 163, 184, 0.22);
+        background: var(--bg-2);
+        border: 1px solid var(--border);
         box-shadow: var(--inset-highlight);
     }
 
@@ -619,16 +629,24 @@
         width: 9px;
         height: 9px;
         border-radius: 50%;
-        background: rgba(148, 163, 184, 0.7);
+        background: var(--muted-2);
     }
 
-    .status-success { color: rgba(236, 253, 245, 0.95); border-color: rgba(16, 185, 129, 0.22); background: rgba(16, 185, 129, 0.12); }
-    .status-success .status-dot { background: rgba(16, 185, 129, 0.95); }
+    .status-success {
+        color: color-mix(in srgb, var(--success) 70%, var(--text));
+        border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+        background: color-mix(in srgb, var(--success) 12%, var(--bg-2));
+    }
+    .status-success .status-dot { background: var(--success); }
 
-    .status-warn { color: rgba(254, 242, 242, 0.95); border-color: rgba(251, 113, 133, 0.22); background: rgba(251, 113, 133, 0.12); }
-    .status-warn .status-dot { background: rgba(251, 113, 133, 0.95); }
+    .status-warn {
+        color: color-mix(in srgb, var(--danger) 70%, var(--text));
+        border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+        background: color-mix(in srgb, var(--danger) 12%, var(--bg-2));
+    }
+    .status-warn .status-dot { background: var(--danger); }
 
-    .status-neutral { color: rgba(248, 250, 252, 0.92); }
+    .status-neutral { color: var(--text); }
 
     /* --- Sidebar Styles --- */
 
@@ -648,16 +666,18 @@
         font-weight: 800;
         cursor: pointer;
         user-select: none;
-        background: rgba(248, 250, 252, 0.06);
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        border-radius: var(--radius-md);
-        color: rgba(248, 250, 252, 0.92);
-        box-shadow: var(--inset-highlight);
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        color: var(--text);
+    }
+    .help-summary:hover {
+        border-color: var(--border-2);
     }
     .help-list {
         margin: 10px 0 0;
         padding: 10px 12px 0 26px;
-        color: rgba(248, 250, 252, 0.82);
+        color: var(--muted);
         line-height: 1.55;
     }
 
@@ -675,7 +695,7 @@
         font-size: 1.08rem;
         font-weight: 850;
         margin: 0;
-        color: rgba(248, 250, 252, 0.92);
+        color: var(--text);
     }
 
     .panel-hint {
@@ -698,13 +718,36 @@
         margin-bottom: 16px;
     }
 
+	.cell-error-section {
+		margin-bottom: 14px;
+	}
+
+	.cell-error-box {
+		background: var(--danger-surface);
+		border: 1px solid var(--danger-border);
+		border-radius: var(--radius-md);
+		padding: 10px 12px;
+	}
+
+	.cell-error-meta {
+		font-size: 0.8rem;
+		color: var(--danger-meta);
+		margin-bottom: 6px;
+	}
+
+	.cell-error-text {
+		color: var(--danger-text);
+		font-size: 0.92rem;
+		line-height: 1.45;
+	}
+
     .empty-placeholder {
         display: grid;
         place-items: center;
         height: 60px;
-        background: rgba(248, 250, 252, 0.04);
+        background: var(--bg-2);
         border-radius: var(--radius-md);
-        border: 1px dashed rgba(148, 163, 184, 0.28);
+        border: 1px dashed var(--border-2);
         color: var(--muted);
         font-size: 0.9rem;
     }
@@ -718,15 +761,15 @@
         align-items: center;
         font-size: 0.95rem;
         font-weight: 750;
-        color: rgba(248, 250, 252, 0.9);
+        color: var(--text);
         padding: 10px 0;
         border-top: 1px solid var(--border);
     }
 
     .badge-count {
-        background: rgba(148, 163, 184, 0.12);
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        color: rgba(248, 250, 252, 0.82);
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        color: var(--muted);
         font-size: 0.8rem;
         padding: 2px 8px;
         border-radius: 99px;
@@ -740,51 +783,41 @@
 
     /* Toast & Utils */
     .toast {
-        background: rgba(2, 6, 23, 0.68);
-        border: 1px solid var(--border);
-        color: rgba(248, 250, 252, 0.95);
+        background: var(--tooltip-bg);
+        border: 1px solid var(--tooltip-border);
+        color: var(--tooltip-text);
         padding: 10px 12px;
         border-radius: var(--radius-sm);
         text-align: center;
         font-size: 0.92rem;
         margin-bottom: 12px;
-        box-shadow: var(--shadow-chip), var(--inset-highlight);
+        box-shadow: var(--shadow-soft);
     }
 
     .share-manual {
         margin-bottom: 12px;
     }
 
-    .input-copy {
-        width: 100%;
-        padding: 10px 10px;
-        border: 1px solid rgba(148, 163, 184, 0.25);
-        border-radius: var(--radius-sm);
-        background: rgba(2, 6, 23, 0.35);
-        color: rgba(248, 250, 252, 0.92);
-        font-family: var(--mono);
-    }
-
     .hint-banner {
-        background: rgba(251, 113, 133, 0.12);
-        border: 1px solid rgba(251, 113, 133, 0.25);
-        color: rgba(248, 250, 252, 0.92);
+        background: var(--danger-surface);
+        border: 1px solid var(--danger-border);
+        color: var(--danger-text);
         padding: 10px 12px;
         border-radius: var(--radius-sm);
         margin-bottom: 12px;
     }
 
     .error-banner {
-        background: rgba(251, 113, 133, 0.12);
-        border: 1px solid rgba(251, 113, 133, 0.25);
-        color: rgba(248, 250, 252, 0.92);
+        background: var(--danger-surface);
+        border: 1px solid var(--danger-border);
+        color: var(--danger-text);
         padding: 12px 14px;
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-lg);
         text-align: center;
         margin-bottom: 16px;
     }
 
-    .debug-panel { margin-top: 16px; opacity: 0.6; font-size: 0.85rem; }
+    .debug-panel { margin-top: 16px; opacity: 0.75; font-size: 0.85rem; }
 
     .debug-content {
         display: grid;

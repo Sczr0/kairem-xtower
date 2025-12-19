@@ -5,10 +5,29 @@ export type ValidateResult = {
 	cell_messages: (string | undefined)[];
 };
 
+export type DifficultyStats = {
+	node_visits: number;
+	decision_points: number;
+	branch_attempts: number;
+	dead_ends: number;
+	solutions: number;
+	propagate_rounds: number;
+	assignments_initial: number;
+	assignments_guess: number;
+	assignments_propagated: number;
+	max_depth: number;
+};
+
+export type DifficultyReport = {
+	difficulty_score: number;
+	stats: DifficultyStats;
+};
+
 export type Engine = {
 	date_to_seed_ymd(date: string): bigint;
 	generate_puzzle(seed: bigint): number[][];
 	validate_state(checked_mask: number, color_grid: Uint8Array): ValidateResult;
+	difficulty_report(color_grid: Uint8Array): DifficultyReport;
 };
 
 // 说明：

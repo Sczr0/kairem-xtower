@@ -146,6 +146,143 @@ impl RuleSet {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SolveStats {
+    pub node_visits: u64,
+    pub decision_points: u64,
+    pub branch_attempts: u64,
+    pub dead_ends: u64,
+    pub solutions: u64,
+
+    pub propagate_rounds: u64,
+
+    pub assignments_initial: u64,
+    pub assignments_guess: u64,
+    pub assignments_propagated: u64,
+
+    pub max_depth: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum AssignReason {
+    Initial,
+    Guess,
+    Propagate,
+}
+
+trait SolveObserver {
+    fn on_node(&mut self, _depth: u32) {}
+    fn on_decision_point(&mut self) {}
+    fn on_branch_attempt(&mut self) {}
+    fn on_dead_end(&mut self) {}
+    fn on_solution(&mut self) {}
+    fn on_propagate_round(&mut self) {}
+    fn on_assignment(&mut self, _reason: AssignReason) {}
+}
+
+impl SolveObserver for () {}
+
+impl SolveObserver for SolveStats {
+    fn on_node(&mut self, depth: u32) {
+        self.node_visits += 1;
+        self.max_depth = self.max_depth.max(depth);
+    }
+
+    fn on_decision_point(&mut self) {
+        self.decision_points += 1;
+    }
+
+    fn on_branch_attempt(&mut self) {
+        self.branch_attempts += 1;
+    }
+
+    fn on_dead_end(&mut self) {
+        self.dead_ends += 1;
+    }
+
+    fn on_solution(&mut self) {
+        self.solutions += 1;
+    }
+
+    fn on_propagate_round(&mut self) {
+        self.propagate_rounds += 1;
+    }
+
+    fn on_assignment(&mut self, reason: AssignReason) {
+        match reason {
+            AssignReason::Initial => self.assignments_initial += 1,
+            AssignReason::Guess => self.assignments_guess += 1,
+            AssignReason::Propagate => self.assignments_propagated += 1,
+        }
+    }
+}
+
+fn try_set_checked<O: SolveObserver>(
+    state: &mut SolverState,
+    row: usize,
+    col: usize,
+    reason: AssignReason,
+    obs: &mut O,
+) -> bool {
+    match state.set_checked(row, col) {
+        Ok(true) => {
+            obs.on_assignment(reason);
+            true
+        }
+        Ok(false) => true,
+        Err(()) => false,
+    }
+}
+
+fn try_set_unchecked<O: SolveObserver>(
+    state: &mut SolverState,
+    row: usize,
+    col: usize,
+    reason: AssignReason,
+    obs: &mut O,
+) -> bool {
+    match state.set_unchecked(row, col) {
+        Ok(true) => {
+            obs.on_assignment(reason);
+            true
+        }
+        Ok(false) => true,
+        Err(()) => false,
+    }
+}
+
+fn try_set_checked_id<O: SolveObserver>(
+    state: &mut SolverState,
+    id: usize,
+    reason: AssignReason,
+    obs: &mut O,
+) -> bool {
+    match state.set_checked_id(id) {
+        Ok(true) => {
+            obs.on_assignment(reason);
+            true
+        }
+        Ok(false) => true,
+        Err(()) => false,
+    }
+}
+
+fn try_set_unchecked_id<O: SolveObserver>(
+    state: &mut SolverState,
+    id: usize,
+    reason: AssignReason,
+    obs: &mut O,
+) -> bool {
+    match state.set_unchecked_id(id) {
+        Ok(true) => {
+            obs.on_assignment(reason);
+            true
+        }
+        Ok(false) => true,
+        Err(()) => false,
+    }
+}
+
 /// 求解器（约束传播 + 猜测回溯）。
 ///
 /// 说明：
@@ -172,21 +309,49 @@ impl Solver {
         }
 
         let mut out = Vec::new();
-        self.search(state, limit, &mut out);
+        let mut obs = ();
+        self.search(state, limit, &mut out, 0, &mut obs);
         out
     }
 
-    fn search(&self, state: SolverState, limit: usize, out: &mut Vec<Mask>) {
+    pub(crate) fn solve_masks_limit_with_stats(
+        &self,
+        limit: usize,
+        stats: &mut SolveStats,
+    ) -> Vec<Mask> {
+        let mut state = SolverState::new(self.rules.size);
+        for &id in &self.rules.black_cells {
+            if !try_set_checked_id(&mut state, id, AssignReason::Initial, stats) {
+                return Vec::new();
+            }
+        }
+
+        let mut out = Vec::new();
+        self.search(state, limit, &mut out, 0, stats);
+        out
+    }
+
+    fn search(
+        &self,
+        state: SolverState,
+        limit: usize,
+        out: &mut Vec<Mask>,
+        depth: u32,
+        obs: &mut impl SolveObserver,
+    ) {
         if limit != 0 && out.len() >= limit {
             return;
         }
 
         let mut state = state;
-        if !self.propagate_to_fixpoint(&mut state) {
+        obs.on_node(depth);
+        if !self.propagate_to_fixpoint(&mut state, obs) {
+            obs.on_dead_end();
             return;
         }
 
         if state.is_fully_decided() {
+            obs.on_solution();
             out.push(state.to_row_major_u32_mask());
             return;
         }
@@ -194,20 +359,31 @@ impl Solver {
         let Some(cell) = self.find_next_unknown_cell(&state) else {
             return;
         };
+        obs.on_decision_point();
 
         // 分支 1：先尝试“不勾选”（对很多规则更容易快速剪枝）
         {
             let mut fork = state.clone();
-            if fork.set_unchecked_id(cell).is_ok() {
-                self.search(fork, limit, out);
+            obs.on_branch_attempt();
+            if try_set_unchecked_id(&mut fork, cell, AssignReason::Guess, obs) {
+                self.search(fork, limit, out, depth + 1, obs);
+            } else {
+                obs.on_dead_end();
             }
+        }
+
+        if limit != 0 && out.len() >= limit {
+            return;
         }
 
         // 分支 2：尝试“勾选”
         {
             let mut fork = state;
-            if fork.set_checked_id(cell).is_ok() {
-                self.search(fork, limit, out);
+            obs.on_branch_attempt();
+            if try_set_checked_id(&mut fork, cell, AssignReason::Guess, obs) {
+                self.search(fork, limit, out, depth + 1, obs);
+            } else {
+                obs.on_dead_end();
             }
         }
     }
@@ -221,29 +397,30 @@ impl Solver {
         None
     }
 
-    fn propagate_to_fixpoint(&self, state: &mut SolverState) -> bool {
+    fn propagate_to_fixpoint(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         loop {
             let old = state.hash64();
+            obs.on_propagate_round();
 
-            if !self.propagate_green(state) {
+            if !self.propagate_green(state, obs) {
                 return false;
             }
-            if !self.propagate_yellow(state) {
+            if !self.propagate_yellow(state, obs) {
                 return false;
             }
-            if !self.propagate_blue(state) {
+            if !self.propagate_blue(state, obs) {
                 return false;
             }
-            if !self.propagate_red(state) {
+            if !self.propagate_red(state, obs) {
                 return false;
             }
-            if !self.propagate_purple(state) {
+            if !self.propagate_purple(state, obs) {
                 return false;
             }
-            if !self.propagate_orange(state) {
+            if !self.propagate_orange(state, obs) {
                 return false;
             }
-            if !self.propagate_cyan(state) {
+            if !self.propagate_cyan(state, obs) {
                 return false;
             }
             if !self.propagate_five_in_a_row_possible(state) {
@@ -257,7 +434,7 @@ impl Solver {
         true
     }
 
-    fn propagate_green(&self, state: &mut SolverState) -> bool {
+    fn propagate_green(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.green_cells {
             let row = id / self.rules.size;
             let col = id % self.rules.size;
@@ -270,20 +447,20 @@ impl Solver {
 
             // 情况 A：Row 的 Max == Col 的 Min
             if r_max == c_min {
-                if !fill_row_unknowns_as(state, row, true) {
+                if !fill_row_unknowns_as(state, row, true, obs) {
                     return false;
                 }
-                if !fill_col_unknowns_as(state, col, false) {
+                if !fill_col_unknowns_as(state, col, false, obs) {
                     return false;
                 }
             }
 
             // 情况 B：Col 的 Max == Row 的 Min
             if c_max == r_min {
-                if !fill_col_unknowns_as(state, col, true) {
+                if !fill_col_unknowns_as(state, col, true, obs) {
                     return false;
                 }
-                if !fill_row_unknowns_as(state, row, false) {
+                if !fill_row_unknowns_as(state, row, false, obs) {
                     return false;
                 }
             }
@@ -291,7 +468,7 @@ impl Solver {
         true
     }
 
-    fn propagate_yellow(&self, state: &mut SolverState) -> bool {
+    fn propagate_yellow(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.yellow_cells {
             let row = id / self.rules.size;
             let col = id % self.rules.size;
@@ -308,18 +485,19 @@ impl Solver {
 
             // 对角线推导与绿格一致（范围卡边界）
             if d_max == u_min {
-                if !fill_cells_unknowns_as(state, &self.rules.diag_down_cells[down_id], true) {
+                if !fill_cells_unknowns_as(state, &self.rules.diag_down_cells[down_id], true, obs) {
                     return false;
                 }
-                if !fill_cells_unknowns_as(state, &self.rules.diag_up_cells[up_id], false) {
+                if !fill_cells_unknowns_as(state, &self.rules.diag_up_cells[up_id], false, obs) {
                     return false;
                 }
             }
             if u_max == d_min {
-                if !fill_cells_unknowns_as(state, &self.rules.diag_up_cells[up_id], true) {
+                if !fill_cells_unknowns_as(state, &self.rules.diag_up_cells[up_id], true, obs) {
                     return false;
                 }
-                if !fill_cells_unknowns_as(state, &self.rules.diag_down_cells[down_id], false) {
+                if !fill_cells_unknowns_as(state, &self.rules.diag_down_cells[down_id], false, obs)
+                {
                     return false;
                 }
             }
@@ -327,7 +505,7 @@ impl Solver {
         true
     }
 
-    fn propagate_red(&self, state: &mut SolverState) -> bool {
+    fn propagate_red(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.red_cells {
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
@@ -349,7 +527,12 @@ impl Solver {
                 return false;
             }
             if unknown_count == 1 {
-                if state.set_checked_id(last_unknown.expect("unknown_count==1")).is_err() {
+                if !try_set_checked_id(
+                    state,
+                    last_unknown.expect("unknown_count==1"),
+                    AssignReason::Propagate,
+                    obs,
+                ) {
                     return false;
                 }
             }
@@ -357,7 +540,7 @@ impl Solver {
         true
     }
 
-    fn propagate_blue(&self, state: &mut SolverState) -> bool {
+    fn propagate_blue(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.blue_cells {
             let mut checked = 0usize;
             let mut unknowns = Vec::new();
@@ -376,7 +559,7 @@ impl Solver {
             // 已经 2 个勾选 -> 剩余未知邻居全部必须不勾选
             if checked == 2 {
                 for n in unknowns {
-                    if state.set_unchecked_id(n).is_err() {
+                    if !try_set_unchecked_id(state, n, AssignReason::Propagate, obs) {
                         return false;
                     }
                 }
@@ -385,7 +568,7 @@ impl Solver {
         true
     }
 
-    fn propagate_purple(&self, state: &mut SolverState) -> bool {
+    fn propagate_purple(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.purple_cells {
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
@@ -411,12 +594,12 @@ impl Solver {
             if unknown_count == 1 {
                 let target = last_unknown.expect("unknown_count==1");
                 let should_check = checked % 2 == 0;
-                let res = if should_check {
-                    state.set_checked_id(target)
+                let ok = if should_check {
+                    try_set_checked_id(state, target, AssignReason::Propagate, obs)
                 } else {
-                    state.set_unchecked_id(target)
+                    try_set_unchecked_id(state, target, AssignReason::Propagate, obs)
                 };
-                if res.is_err() {
+                if !ok {
                     return false;
                 }
             }
@@ -424,7 +607,7 @@ impl Solver {
         true
     }
 
-    fn propagate_orange(&self, state: &mut SolverState) -> bool {
+    fn propagate_orange(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.orange_cells {
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
@@ -450,12 +633,12 @@ impl Solver {
             if unknown_count == 1 {
                 let target = last_unknown.expect("unknown_count==1");
                 let should_check = checked % 2 == 1;
-                let res = if should_check {
-                    state.set_checked_id(target)
+                let ok = if should_check {
+                    try_set_checked_id(state, target, AssignReason::Propagate, obs)
                 } else {
-                    state.set_unchecked_id(target)
+                    try_set_unchecked_id(state, target, AssignReason::Propagate, obs)
                 };
-                if res.is_err() {
+                if !ok {
                     return false;
                 }
             }
@@ -463,7 +646,7 @@ impl Solver {
         true
     }
 
-    fn propagate_cyan(&self, state: &mut SolverState) -> bool {
+    fn propagate_cyan(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.cyan_cells {
             let (row, col) = (id / self.rules.size, id % self.rules.size);
 
@@ -494,10 +677,12 @@ impl Solver {
                     return false;
                 }
                 if unknown_count == 1 {
-                    if state
-                        .set_checked_id(last_unknown.expect("unknown_count==1"))
-                        .is_err()
-                    {
+                    if !try_set_checked_id(
+                        state,
+                        last_unknown.expect("unknown_count==1"),
+                        AssignReason::Propagate,
+                        obs,
+                    ) {
                         return false;
                     }
                 }
@@ -513,7 +698,7 @@ impl Solver {
                 }
             }
             if all_neighbors_unchecked {
-                if state.set_unchecked(row, col).is_err() {
+                if !try_set_unchecked(state, row, col, AssignReason::Propagate, obs) {
                     return false;
                 }
             }
@@ -526,53 +711,68 @@ impl Solver {
     }
 }
 
-fn fill_row_unknowns_as(state: &mut SolverState, row: usize, is_checked: bool) -> bool {
+fn fill_row_unknowns_as(
+    state: &mut SolverState,
+    row: usize,
+    is_checked: bool,
+    obs: &mut impl SolveObserver,
+) -> bool {
     let mut mask = state.unknown_cols_mask_in_row(row);
     while mask != 0 {
         let col = mask.trailing_zeros() as usize;
         mask &= mask - 1;
 
-        let res = if is_checked {
-            state.set_checked(row, col)
+        let ok = if is_checked {
+            try_set_checked(state, row, col, AssignReason::Propagate, obs)
         } else {
-            state.set_unchecked(row, col)
+            try_set_unchecked(state, row, col, AssignReason::Propagate, obs)
         };
-        if res.is_err() {
+        if !ok {
             return false;
         }
     }
     true
 }
 
-fn fill_col_unknowns_as(state: &mut SolverState, col: usize, is_checked: bool) -> bool {
+fn fill_col_unknowns_as(
+    state: &mut SolverState,
+    col: usize,
+    is_checked: bool,
+    obs: &mut impl SolveObserver,
+) -> bool {
     let mut mask = state.unknown_rows_mask_in_col(col);
     while mask != 0 {
         let row = mask.trailing_zeros() as usize;
         mask &= mask - 1;
 
-        let res = if is_checked {
-            state.set_checked(row, col)
+        let ok = if is_checked {
+            try_set_checked(state, row, col, AssignReason::Propagate, obs)
         } else {
-            state.set_unchecked(row, col)
+            try_set_unchecked(state, row, col, AssignReason::Propagate, obs)
         };
-        if res.is_err() {
+        if !ok {
             return false;
         }
     }
     true
 }
 
-fn fill_cells_unknowns_as(state: &mut SolverState, cell_ids: &[usize], is_checked: bool) -> bool {
+fn fill_cells_unknowns_as(
+    state: &mut SolverState,
+    cell_ids: &[usize],
+    is_checked: bool,
+    obs: &mut impl SolveObserver,
+) -> bool {
     for &id in cell_ids {
         if !state.is_unknown_id(id) {
             continue;
         }
-        let res = if is_checked {
-            state.set_checked_id(id)
+        let ok = if is_checked {
+            try_set_checked_id(state, id, AssignReason::Propagate, obs)
         } else {
-            state.set_unchecked_id(id)
+            try_set_unchecked_id(state, id, AssignReason::Propagate, obs)
         };
-        if res.is_err() {
+        if !ok {
             return false;
         }
     }

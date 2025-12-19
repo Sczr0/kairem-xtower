@@ -5,6 +5,7 @@
 
 mod colors;
 mod date_seed;
+mod difficulty;
 mod generate;
 mod masks;
 mod solver;
@@ -13,6 +14,7 @@ mod validate;
 use wasm_bindgen::prelude::*;
 
 pub use colors::{Color, COLOR_COUNT};
+pub use difficulty::{DifficultyError, DifficultyReport};
 pub use generate::GenerateError;
 pub use validate::{ValidateError, ValidateResult};
 
@@ -27,6 +29,11 @@ pub fn validate_state_native(
     color_grid: &[u8],
 ) -> Result<ValidateResult, ValidateError> {
     validate::validate_state(checked_mask, color_grid)
+}
+
+/// Rust 原生接口：计算题目难度分（基于求解器搜索过程统计）。
+pub fn difficulty_report_native(color_grid: &[u8]) -> Result<DifficultyReport, DifficultyError> {
+    difficulty::difficulty_report(color_grid)
 }
 
 #[wasm_bindgen]
@@ -52,4 +59,12 @@ pub fn validate_state(checked_mask: u32, color_grid: Vec<u8>) -> Result<JsValue,
     let res = validate_state_native(checked_mask, &color_grid)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&res).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// 计算题目难度分（返回 JSON 对象）。
+#[wasm_bindgen]
+pub fn difficulty_report(color_grid: Vec<u8>) -> Result<JsValue, JsValue> {
+    let report =
+        difficulty_report_native(&color_grid).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&report).map_err(|e| JsValue::from_str(&e.to_string()))
 }

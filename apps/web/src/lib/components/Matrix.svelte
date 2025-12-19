@@ -8,7 +8,6 @@
 	export let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	export let checkedMask = 0;
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
-	export let cellMessages: (string | undefined)[] = Array.from({ length: 25 }, () => undefined);
 	export let onToggle: (index: number) => void = () => {};
 	export let onHover: (index: number | null) => void = () => {};
 
@@ -17,32 +16,12 @@
 	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
 
-	let hoveredIndex: number | null = null;
-	let tooltipVisible = false;
-	let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
-
 	function handleMouseEnter(i: number) {
-		hoveredIndex = i;
 		onHover(i);
-		
-		// 如果有错误信息，延迟显示 Tooltip
-		if (!cellOk[i] && cellMessages[i]) {
-			tooltipTimer = setTimeout(() => {
-				if (hoveredIndex === i) {
-					tooltipVisible = true;
-				}
-			}, 500); // 500ms 延迟
-		}
 	}
 
 	function handleMouseLeave() {
-		hoveredIndex = null;
 		onHover(null);
-		tooltipVisible = false;
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-			tooltipTimer = null;
-		}
 	}
 </script>
 
@@ -80,12 +59,6 @@
 					</svg>
 				{/if}
 			</button>
-			{#if hoveredIndex === i && tooltipVisible && cellMessages[i]}
-				<div class="tooltip" role="tooltip">
-					{cellMessages[i]}
-					<div class="tooltip-arrow"></div>
-				</div>
-			{/if}
 		</div>
 	{/each}
 </div>
@@ -106,44 +79,6 @@
 		position: relative;
 	}
 
-	.tooltip {
-		position: absolute;
-		bottom: 100%;
-		left: 50%;
-		transform: translateX(-50%);
-		margin-bottom: 8px;
-		background: rgba(2, 6, 23, 0.92);
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		color: rgba(248, 250, 252, 0.92);
-		padding: 8px 12px;
-		border-radius: 8px;
-		font-size: 0.75rem;
-		line-height: 1.4;
-		white-space: nowrap;
-		z-index: 50;
-		pointer-events: none;
-		box-shadow: var(--shadow-chip), var(--inset-highlight);
-		max-width: 200px;
-		white-space: normal;
-		text-align: center;
-		animation: fadeIn 0.2s ease-out;
-	}
-
-	.tooltip-arrow {
-		position: absolute;
-		top: 100%;
-		left: 50%;
-		transform: translateX(-50%);
-		border-width: 6px;
-		border-style: solid;
-		border-color: rgba(2, 6, 23, 0.92) transparent transparent transparent;
-	}
-
-	@keyframes fadeIn {
-		from { opacity: 0; transform: translate(-50%, 4px); }
-		to { opacity: 1; transform: translate(-50%, 0); }
-	}
-
 	@media (max-width: 720px) {
 		.matrix {
 			grid-template-columns: repeat(5, 60px);
@@ -157,32 +92,30 @@
 		width: 100px;
 		height: 100px;
 		border-radius: 10px;
-		border: 1px solid rgba(148, 163, 184, 0.24);
-		background: linear-gradient(180deg, rgba(248, 250, 252, 0.1), rgba(248, 250, 252, 0.04));
-		box-shadow:
-			0 1px 0 rgba(255, 255, 255, 0.06) inset,
-			0 -1px 0 rgba(0, 0, 0, 0.55) inset;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		box-shadow: var(--inset-highlight);
 		cursor: pointer;
 		display: grid;
 		place-items: center;
-		color: rgba(248, 250, 252, 0.92);
+		color: var(--text);
 		overflow: hidden;
 		transition:
-			background-color 160ms ease,
-			border-color 160ms ease,
+			background-color 140ms ease,
+			border-color 140ms ease,
+			box-shadow 140ms ease,
 			transform 80ms ease;
 	}
 
 	.cell:hover:not(:disabled) {
-		border-color: rgba(56, 189, 248, 0.45);
-		background: linear-gradient(180deg, rgba(248, 250, 252, 0.14), rgba(248, 250, 252, 0.05));
+		border-color: var(--border-2);
+		background: var(--panel-hover);
+		box-shadow: var(--inset-highlight);
 	}
 
 	.cell:active:not(:disabled) {
 		transform: translateY(1px);
-		box-shadow:
-			0 1px 0 rgba(255, 255, 255, 0.05) inset,
-			0 1px 0 rgba(0, 0, 0, 0.55) inset;
+		box-shadow: var(--inset-shadow);
 	}
 
 	@media (max-width: 720px) {
@@ -195,9 +128,9 @@
 
 	.cell:disabled {
 		cursor: not-allowed;
-		opacity: 0.85;
-		background: linear-gradient(180deg, rgba(2, 6, 23, 0.55), rgba(2, 6, 23, 0.35));
-		border-color: rgba(148, 163, 184, 0.18);
+		opacity: 0.8;
+		background: var(--bg-2);
+		border-color: var(--border);
 	}
 
 	.color-bar {
@@ -207,7 +140,7 @@
 		bottom: 0;
 		width: 6px;
 		background: var(--cell-color, #94a3b8);
-		opacity: 0.8;
+		opacity: 0.95;
 		transition: opacity 0.2s;
 	}
 
@@ -217,25 +150,26 @@
 		position: absolute;
 		inset: 0;
 		background: var(--cell-color);
-		opacity: 0.07;
+		opacity: 0.06;
 		pointer-events: none;
 		transition: opacity 0.2s;
 	}
 
 	.cell.checked {
-		background: linear-gradient(180deg, rgba(248, 250, 252, 0.16), rgba(248, 250, 252, 0.06));
-		color: rgba(248, 250, 252, 0.92);
-		border-color: rgba(248, 250, 252, 0.5);
+		background: var(--panel);
+		color: var(--text);
+		border-color: var(--border-2);
+		box-shadow: var(--inset-highlight);
 	}
 
 	/* Keep the tint visible but maybe slightly adjusted if needed,
 	   or just let it sit on top of slate-50 */
 	.cell.checked::before {
-		opacity: 0.14;
+		opacity: 0.12;
 	}
 	
 	.cell.checked:hover:not(:disabled) {
-		border-color: rgba(248, 250, 252, 0.72);
+		border-color: var(--border-2);
 	}
 	
 	.cell.checked .color-bar {

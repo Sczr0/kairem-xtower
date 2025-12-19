@@ -13,6 +13,7 @@
 	export let rule: Rule;
 	export let color = '#94a3b8';
 	export let highlighted = false;
+	export let highlightTone: 'strong' | 'soft' = 'strong';
 
 	const appliesWhenLabelMap: Record<string, string> = {
 		always: '约束',
@@ -26,7 +27,7 @@
 		rule.appliesWhen === 'goal' ? 'goal' : rule.appliesWhen === 'checkedOnly' ? 'checked' : 'always';
 </script>
 
-<div class="rule-card {highlighted ? 'highlighted' : ''}">
+<div class="rule-card {highlighted ? 'highlighted' : ''} {highlighted ? highlightTone : ''}">
 	<div class="swatch" style="--swatch: {color}" aria-hidden="true"></div>
 	<div class="content">
 		<div class="header">
@@ -43,32 +44,43 @@
 		gap: 12px;
 		padding: 12px;
 		border-radius: var(--radius-md);
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		background: rgba(248, 250, 252, 0.04);
-		box-shadow: var(--inset-highlight);
+		border: 1px solid var(--border);
+		background: var(--panel-2);
 		transition:
 			border-color 150ms ease,
 			box-shadow 150ms ease,
 			background-color 150ms ease;
 	}
 
-	.rule-card.highlighted {
-		background: rgba(248, 250, 252, 0.06);
-		border-color: rgba(248, 250, 252, 0.26);
-		border-color: color-mix(in srgb, var(--swatch) 55%, rgba(248, 250, 252, 0.26));
-		box-shadow: var(--inset-highlight), 0 0 0 3px rgba(248, 250, 252, 0.08);
-		box-shadow: var(--inset-highlight), 0 0 0 3px color-mix(in srgb, var(--swatch) 22%, transparent);
+	.rule-card.highlighted.strong {
+		background: color-mix(in srgb, var(--swatch) 7%, var(--panel-2));
+		border-color: color-mix(in srgb, var(--swatch) 34%, var(--border-2));
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--swatch) 24%, transparent);
+	}
+
+	/* 列表态高亮：避免过强 ring 破坏整体秩序，用更克制的“描边 + 色块强调” */
+	.rule-card.highlighted.soft {
+		background: var(--panel-2);
+		border-color: color-mix(in srgb, var(--swatch) 28%, var(--border-2));
+		box-shadow: none;
 	}
 
 	.swatch {
-		width: 12px;
-		height: 12px;
-		border-radius: 4px;
+		width: 14px;
+		height: 14px;
+		border-radius: 5px;
 		background: var(--swatch);
-		box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--swatch) 28%, transparent);
+		box-shadow:
+			0 0 0 1px var(--border),
+			0 0 0 3px color-mix(in srgb, var(--swatch) 42%, transparent);
 		margin-top: 4px;
 		flex-shrink: 0;
+	}
+
+	.rule-card.highlighted.soft .swatch {
+		box-shadow:
+			0 0 0 1px var(--border),
+			0 0 0 5px color-mix(in srgb, var(--swatch) 58%, transparent);
 	}
 
 	.content {
@@ -88,7 +100,7 @@
 		font-weight: 750;
 		font-size: 0.9rem;
 		letter-spacing: -0.01em;
-		color: rgba(248, 250, 252, 0.92);
+		color: var(--text);
 	}
 
 	.badge {
@@ -101,21 +113,21 @@
 	}
 
 	.badge.always {
-		background: rgba(148, 163, 184, 0.12);
-		color: rgba(248, 250, 252, 0.82);
-		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: var(--bg-2);
+		color: var(--muted);
+		border: 1px solid var(--border);
 	}
 
 	.badge.checked {
-		background: rgba(56, 189, 248, 0.12);
-		color: rgba(224, 242, 254, 0.95);
-		border: 1px solid rgba(56, 189, 248, 0.22);
+		background: color-mix(in srgb, #0ea5e9 14%, var(--panel));
+		color: color-mix(in srgb, #0ea5e9 70%, var(--text));
+		border: 1px solid color-mix(in srgb, #0ea5e9 32%, var(--border));
 	}
 
 	.badge.goal {
-		background: rgba(234, 179, 8, 0.14);
-		color: rgba(254, 243, 199, 0.95);
-		border: 1px solid rgba(234, 179, 8, 0.22);
+		background: color-mix(in srgb, #f59e0b 16%, var(--panel));
+		color: color-mix(in srgb, #f59e0b 75%, var(--text));
+		border: 1px solid color-mix(in srgb, #f59e0b 34%, var(--border));
 	}
 
 	.desc {

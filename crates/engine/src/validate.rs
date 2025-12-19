@@ -63,7 +63,14 @@ pub fn validate_state(
             let (ok, msg) = match colors[i] {
                 Color::Black => {
                     let ok = (checked_mask & cell_bit(i)) != 0;
-                    (ok, if ok { None } else { Some("黑格必须被勾选".to_string()) })
+                    (
+                        ok,
+                        if ok {
+                            None
+                        } else {
+                            Some("黑格必须被勾选".to_string())
+                        },
+                    )
                 }
                 Color::White => (true, None),
                 Color::Red => {
@@ -153,7 +160,10 @@ pub fn validate_state(
                             if ok {
                                 None
                             } else {
-                                Some(format!("被勾选时，上下左右需至少 1 个勾选，当前为 {}", count))
+                                Some(format!(
+                                    "被勾选时，上下左右需至少 1 个勾选，当前为 {}",
+                                    count
+                                ))
                             },
                         )
                     }

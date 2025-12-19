@@ -6,7 +6,9 @@
 
 use std::env;
 
-use kairm_engine::{date_to_seed_ymd, generate_puzzle_grid, validate_state_native, Color};
+use kairm_engine::{
+    date_to_seed_ymd, difficulty_report_native, generate_puzzle_grid, validate_state_native, Color,
+};
 
 fn main() {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
@@ -44,6 +46,8 @@ fn main() {
 
     let res = validate_state_native(black_mask, &flat).expect("校验失败");
 
+    let diff = difficulty_report_native(&flat).expect("difficulty_report failed");
+
     println!("seed={seed}");
     println!(
         "grid(5x5,u8)={}",
@@ -53,5 +57,9 @@ fn main() {
     println!(
         "validate(initial)={}",
         serde_json::to_string_pretty(&res).unwrap()
+    );
+    println!(
+        "difficulty_report={}",
+        serde_json::to_string_pretty(&diff).unwrap()
     );
 }
