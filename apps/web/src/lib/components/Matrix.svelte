@@ -58,6 +58,8 @@
 				on:click={() => onToggle(i)}
 				on:mouseenter={() => handleMouseEnter(i)}
 				on:mouseleave={handleMouseLeave}
+				on:focus={() => handleMouseEnter(i)}
+				on:blur={handleMouseLeave}
 			>
 				<div class="color-bar" aria-hidden="true"></div>
 				{#if !cellOk[i]}
