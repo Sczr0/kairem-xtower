@@ -31,7 +31,7 @@ pub fn validate_state_native(
     validate::validate_state(checked_mask, color_grid)
 }
 
-/// Rust 原生接口：计算题目难度分（基于求解器搜索过程统计）。
+/// Rust 原生接口：计算题目难度分（偏向“人类逻辑难度”：传播 + 反证 + Bingo 约束强度）。
 pub fn difficulty_report_native(color_grid: &[u8]) -> Result<DifficultyReport, DifficultyError> {
     difficulty::difficulty_report(color_grid)
 }

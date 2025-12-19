@@ -161,26 +161,129 @@ pub(crate) struct SolveStats {
     pub assignments_propagated: u64,
 
     pub max_depth: u32,
+
+    // 推理入口隐蔽度相关
+    pub rule_trigger_counts: std::collections::HashMap<RuleType, u64>,
+    pub first_trigger_counts: std::collections::HashMap<RuleType, u64>,
+    
+    // 回溯距离相关
+    pub decision_point_depths: Vec<u32>,
+    pub backtrack_distances: Vec<u32>,
+    pub avg_backtrack_distance: f64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HumanDifficultyAnalysis {
+    pub solved: bool,
+    pub exhausted_budget: bool,
+
+    pub variable_cells: u32,
+    pub initial_unknown_after_logic: u32,
+
+    /// 当前已确定“不勾选”的格子会排除对应的 5 连线段；该指标用于衡量“Bingo 目标”的约束强度。
+    pub bingo_segments_total: u32,
+    pub bingo_segments_possible: u32,
+    pub bingo_segments_guaranteed: u32,
+
+    /// 主路径上的逻辑传播开销（不包含“反证分支”的开销）。
+    pub logic_propagate_rounds: u64,
+    pub logic_assignments_propagated: u64,
+    pub logic_rule_trigger_counts: std::collections::HashMap<RuleType, u64>,
+    pub logic_first_trigger_counts: std::collections::HashMap<RuleType, u64>,
+
+    /// 反证（假设某格取值）走到矛盾所消耗的传播开销。
+    pub contradiction_propagate_rounds: u64,
+    pub contradiction_assignments_propagated: u64,
+
+    /// 通过“假设 -> 推理 -> 矛盾”得到的强制步数（人类常见的反证法）。
+    pub forced_by_contradiction: u32,
+
+    /// “真猜”的次数：在无法继续推出强制时，需要二选一推进。
+    pub guesses: u32,
+    pub max_guess_depth: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AssignReason {
     Initial,
     Guess,
     Propagate,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum RuleType {
+    Green,
+    Yellow,
+    Red,
+    Blue,
+    Purple,
+    Orange,
+    Cyan,
+    FiveInRow,
+}
+
 trait SolveObserver {
     fn on_node(&mut self, _depth: u32) {}
-    fn on_decision_point(&mut self) {}
+    fn on_decision_point(&mut self, _depth: u32) {}
     fn on_branch_attempt(&mut self) {}
-    fn on_dead_end(&mut self) {}
+    fn on_dead_end(&mut self, _depth: u32) {}
     fn on_solution(&mut self) {}
     fn on_propagate_round(&mut self) {}
     fn on_assignment(&mut self, _reason: AssignReason) {}
+    fn on_rule_trigger(&mut self, _rule: RuleType, _is_first: bool) {}
+    fn on_backtrack(&mut self, _from_depth: u32, _to_depth: u32) {}
 }
 
 impl SolveObserver for () {}
+
+#[derive(Clone, Debug, Default)]
+struct PropagationObserver {
+    propagate_rounds: u64,
+    assignments_propagated: u64,
+    rule_trigger_counts: std::collections::HashMap<RuleType, u64>,
+    first_trigger_counts: std::collections::HashMap<RuleType, u64>,
+}
+
+impl PropagationObserver {
+    fn merge_into_analysis(&self, analysis: &mut HumanDifficultyAnalysis) {
+        analysis.logic_propagate_rounds = analysis.logic_propagate_rounds.saturating_add(self.propagate_rounds);
+        analysis.logic_assignments_propagated =
+            analysis.logic_assignments_propagated.saturating_add(self.assignments_propagated);
+        for (&rule, &count) in &self.rule_trigger_counts {
+            *analysis.logic_rule_trigger_counts.entry(rule).or_insert(0) += count;
+        }
+        for (&rule, &count) in &self.first_trigger_counts {
+            *analysis.logic_first_trigger_counts.entry(rule).or_insert(0) += count;
+        }
+    }
+
+    fn merge_into_contradiction(&self, analysis: &mut HumanDifficultyAnalysis) {
+        analysis.contradiction_propagate_rounds =
+            analysis.contradiction_propagate_rounds.saturating_add(self.propagate_rounds);
+        analysis.contradiction_assignments_propagated = analysis
+            .contradiction_assignments_propagated
+            .saturating_add(self.assignments_propagated);
+    }
+}
+
+impl SolveObserver for PropagationObserver {
+    fn on_propagate_round(&mut self) {
+        self.propagate_rounds += 1;
+    }
+
+    fn on_assignment(&mut self, reason: AssignReason) {
+        if matches!(reason, AssignReason::Propagate) {
+            self.assignments_propagated += 1;
+        }
+    }
+
+    fn on_rule_trigger(&mut self, rule: RuleType, is_first: bool) {
+        *self.rule_trigger_counts.entry(rule).or_insert(0) += 1;
+        if is_first {
+            *self.first_trigger_counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+}
 
 impl SolveObserver for SolveStats {
     fn on_node(&mut self, depth: u32) {
@@ -188,16 +291,25 @@ impl SolveObserver for SolveStats {
         self.max_depth = self.max_depth.max(depth);
     }
 
-    fn on_decision_point(&mut self) {
+    fn on_decision_point(&mut self, depth: u32) {
         self.decision_points += 1;
+        self.decision_point_depths.push(depth);
     }
 
     fn on_branch_attempt(&mut self) {
         self.branch_attempts += 1;
     }
 
-    fn on_dead_end(&mut self) {
+    fn on_dead_end(&mut self, depth: u32) {
         self.dead_ends += 1;
+        // 计算回溯距离：当前深度 - 上一个决策点的深度
+        if let Some(&last_dp_depth) = self.decision_point_depths.last() {
+            let distance = depth.saturating_sub(last_dp_depth);
+            self.backtrack_distances.push(distance);
+            // 更新平均回溯距离
+            let total_distances: u32 = self.backtrack_distances.iter().sum();
+            self.avg_backtrack_distance = total_distances as f64 / self.backtrack_distances.len() as f64;
+        }
     }
 
     fn on_solution(&mut self) {
@@ -214,6 +326,23 @@ impl SolveObserver for SolveStats {
             AssignReason::Guess => self.assignments_guess += 1,
             AssignReason::Propagate => self.assignments_propagated += 1,
         }
+    }
+
+    fn on_rule_trigger(&mut self, rule: RuleType, is_first: bool) {
+        // 更新规则触发计数
+        *self.rule_trigger_counts.entry(rule).or_insert(0) += 1;
+        // 如果是本轮第一个触发的规则，更新第一个触发规则计数
+        if is_first {
+            *self.first_trigger_counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    fn on_backtrack(&mut self, from_depth: u32, to_depth: u32) {
+        let distance = from_depth.saturating_sub(to_depth);
+        self.backtrack_distances.push(distance);
+        // 更新平均回溯距离
+        let total_distances: u32 = self.backtrack_distances.iter().sum();
+        self.avg_backtrack_distance = total_distances as f64 / self.backtrack_distances.len() as f64;
     }
 }
 
@@ -331,6 +460,156 @@ impl Solver {
         out
     }
 
+    pub(crate) fn analyze_human_difficulty(&self) -> HumanDifficultyAnalysis {
+        const BUDGET: u32 = 50_000;
+
+        let mut state = SolverState::new(self.rules.size);
+        for &id in &self.rules.black_cells {
+            if state.set_checked_id(id).is_err() {
+                return HumanDifficultyAnalysis {
+                    solved: false,
+                    exhausted_budget: false,
+                    variable_cells: self.rules.decision_order.len() as u32,
+                    ..HumanDifficultyAnalysis::default()
+                };
+            }
+        }
+
+        let mut analysis = HumanDifficultyAnalysis::default();
+        analysis.variable_cells = self.rules.decision_order.len() as u32;
+
+        let mut budget = BUDGET;
+        if self
+            .propagate_logic_with_budget(&mut state, &mut budget, &mut analysis)
+            .is_none()
+        {
+            analysis.solved = false;
+            analysis.exhausted_budget = budget == 0;
+            let (total, possible, guaranteed) = bingo_segment_stats(&state);
+            analysis.bingo_segments_total = total;
+            analysis.bingo_segments_possible = possible;
+            analysis.bingo_segments_guaranteed = guaranteed;
+            return analysis;
+        }
+        analysis.initial_unknown_after_logic = self.count_unknown_decision_cells(&state);
+
+        // 只做“人类常用”的逻辑阶段：传播 + 反证推出强制。
+        loop {
+            let Some((cell, forced_checked, contradiction_obs)) =
+                self.find_forced_by_contradiction(&state, &mut budget)
+            else {
+                break;
+            };
+
+            analysis.forced_by_contradiction += 1;
+            contradiction_obs.merge_into_contradiction(&mut analysis);
+
+            let assign_res = if forced_checked {
+                state.set_checked_id(cell)
+            } else {
+                state.set_unchecked_id(cell)
+            };
+            if assign_res.is_err() {
+                break;
+            }
+
+            if self
+                .propagate_logic_with_budget(&mut state, &mut budget, &mut analysis)
+                .is_none()
+            {
+                break;
+            }
+        }
+
+        analysis.solved = state.is_fully_decided();
+        analysis.exhausted_budget = budget == 0;
+
+        let (total, possible, guaranteed) = bingo_segment_stats(&state);
+        analysis.bingo_segments_total = total;
+        analysis.bingo_segments_possible = possible;
+        analysis.bingo_segments_guaranteed = guaranteed;
+
+        analysis
+    }
+
+    fn count_unknown_decision_cells(&self, state: &SolverState) -> u32 {
+        self.rules
+            .decision_order
+            .iter()
+            .filter(|&&id| state.is_unknown_id(id))
+            .count() as u32
+    }
+
+    fn propagate_logic_with_budget(
+        &self,
+        state: &mut SolverState,
+        budget: &mut u32,
+        analysis: &mut HumanDifficultyAnalysis,
+    ) -> Option<()> {
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+
+        let mut obs = PropagationObserver::default();
+        if !self.propagate_to_fixpoint(state, &mut obs) {
+            return None;
+        }
+        obs.merge_into_analysis(analysis);
+        Some(())
+    }
+
+    fn find_forced_by_contradiction(
+        &self,
+        state: &SolverState,
+        budget: &mut u32,
+    ) -> Option<(usize, bool, PropagationObserver)> {
+        for &cell in &self.rules.decision_order {
+            if !state.is_unknown_id(cell) {
+                continue;
+            }
+
+            // 假设“不勾选” -> 若矛盾，则强制“勾选”。
+            if let Some(contradiction) = self.contradiction_proof(state, cell, false, budget) {
+                return Some((cell, true, contradiction));
+            }
+            // 假设“勾选” -> 若矛盾，则强制“不勾选”。
+            if let Some(contradiction) = self.contradiction_proof(state, cell, true, budget) {
+                return Some((cell, false, contradiction));
+            }
+        }
+        None
+    }
+
+    fn contradiction_proof(
+        &self,
+        state: &SolverState,
+        cell: usize,
+        assume_checked: bool,
+        budget: &mut u32,
+    ) -> Option<PropagationObserver> {
+        let mut fork = state.clone();
+        let assign_res = if assume_checked {
+            fork.set_checked_id(cell)
+        } else {
+            fork.set_unchecked_id(cell)
+        };
+
+        // 立即矛盾：不需要传播即可判定。
+        if assign_res.is_err() {
+            return Some(PropagationObserver::default());
+        }
+
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+
+        let mut obs = PropagationObserver::default();
+        let ok = self.propagate_to_fixpoint(&mut fork, &mut obs);
+        if ok { None } else { Some(obs) }
+    }
+
     fn search(
         &self,
         state: SolverState,
@@ -346,7 +625,7 @@ impl Solver {
         let mut state = state;
         obs.on_node(depth);
         if !self.propagate_to_fixpoint(&mut state, obs) {
-            obs.on_dead_end();
+            obs.on_dead_end(depth);
             return;
         }
 
@@ -359,7 +638,7 @@ impl Solver {
         let Some(cell) = self.find_next_unknown_cell(&state) else {
             return;
         };
-        obs.on_decision_point();
+        obs.on_decision_point(depth);
 
         // 分支 1：先尝试“不勾选”（对很多规则更容易快速剪枝）
         {
@@ -368,7 +647,7 @@ impl Solver {
             if try_set_unchecked_id(&mut fork, cell, AssignReason::Guess, obs) {
                 self.search(fork, limit, out, depth + 1, obs);
             } else {
-                obs.on_dead_end();
+                obs.on_dead_end(depth + 1);
             }
         }
 
@@ -383,7 +662,7 @@ impl Solver {
             if try_set_checked_id(&mut fork, cell, AssignReason::Guess, obs) {
                 self.search(fork, limit, out, depth + 1, obs);
             } else {
-                obs.on_dead_end();
+                obs.on_dead_end(depth + 1);
             }
         }
     }
@@ -402,29 +681,86 @@ impl Solver {
             let old = state.hash64();
             obs.on_propagate_round();
 
+            let mut any_rule_triggered = false;
+
+            // 传播规则并记录第一个触发的规则
             if !self.propagate_green(state, obs) {
                 return false;
             }
+            let green_triggered = state.hash64() != old;
+            if green_triggered {
+                obs.on_rule_trigger(RuleType::Green, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let green_hash = state.hash64();
             if !self.propagate_yellow(state, obs) {
                 return false;
             }
+            let yellow_triggered = state.hash64() != green_hash;
+            if yellow_triggered {
+                obs.on_rule_trigger(RuleType::Yellow, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let yellow_hash = state.hash64();
             if !self.propagate_blue(state, obs) {
                 return false;
             }
+            let blue_triggered = state.hash64() != yellow_hash;
+            if blue_triggered {
+                obs.on_rule_trigger(RuleType::Blue, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let blue_hash = state.hash64();
             if !self.propagate_red(state, obs) {
                 return false;
             }
+            let red_triggered = state.hash64() != blue_hash;
+            if red_triggered {
+                obs.on_rule_trigger(RuleType::Red, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let red_hash = state.hash64();
             if !self.propagate_purple(state, obs) {
                 return false;
             }
+            let purple_triggered = state.hash64() != red_hash;
+            if purple_triggered {
+                obs.on_rule_trigger(RuleType::Purple, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let purple_hash = state.hash64();
             if !self.propagate_orange(state, obs) {
                 return false;
             }
+            let orange_triggered = state.hash64() != purple_hash;
+            if orange_triggered {
+                obs.on_rule_trigger(RuleType::Orange, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let orange_hash = state.hash64();
             if !self.propagate_cyan(state, obs) {
                 return false;
             }
+            let cyan_triggered = state.hash64() != orange_hash;
+            if cyan_triggered {
+                obs.on_rule_trigger(RuleType::Cyan, !any_rule_triggered);
+                any_rule_triggered = true;
+            }
+
+            let cyan_hash = state.hash64();
             if !self.propagate_five_in_a_row_possible(state) {
                 return false;
+            }
+            let five_in_row_triggered = state.hash64() != cyan_hash;
+            if five_in_row_triggered {
+                obs.on_rule_trigger(RuleType::FiveInRow, !any_rule_triggered);
+                any_rule_triggered = true;
             }
 
             if state.hash64() == old {
@@ -852,6 +1188,122 @@ fn five_in_a_row_possible(state: &SolverState) -> bool {
     }
 
     false
+}
+
+fn bingo_segment_stats(state: &SolverState) -> (u32, u32, u32) {
+    let size = state.size();
+    let len = 5usize;
+    if size < len {
+        return (0, 0, 0);
+    }
+
+    let mut total = 0u32;
+    let mut possible = 0u32;
+    let mut guaranteed = 0u32;
+
+    // 横向
+    for row in 0..size {
+        for start_col in 0..=size - len {
+            total += 1;
+            let mut ok = true;
+            let mut all_checked = true;
+            for dc in 0..len {
+                let col = start_col + dc;
+                if state.is_unchecked(row, col) {
+                    ok = false;
+                    break;
+                }
+                if !state.is_checked(row, col) {
+                    all_checked = false;
+                }
+            }
+            if ok {
+                possible += 1;
+                if all_checked {
+                    guaranteed += 1;
+                }
+            }
+        }
+    }
+
+    // 纵向
+    for col in 0..size {
+        for start_row in 0..=size - len {
+            total += 1;
+            let mut ok = true;
+            let mut all_checked = true;
+            for dr in 0..len {
+                let row = start_row + dr;
+                if state.is_unchecked(row, col) {
+                    ok = false;
+                    break;
+                }
+                if !state.is_checked(row, col) {
+                    all_checked = false;
+                }
+            }
+            if ok {
+                possible += 1;
+                if all_checked {
+                    guaranteed += 1;
+                }
+            }
+        }
+    }
+
+    // 主对角线方向（\）
+    for start_row in 0..=size - len {
+        for start_col in 0..=size - len {
+            total += 1;
+            let mut ok = true;
+            let mut all_checked = true;
+            for d in 0..len {
+                let row = start_row + d;
+                let col = start_col + d;
+                if state.is_unchecked(row, col) {
+                    ok = false;
+                    break;
+                }
+                if !state.is_checked(row, col) {
+                    all_checked = false;
+                }
+            }
+            if ok {
+                possible += 1;
+                if all_checked {
+                    guaranteed += 1;
+                }
+            }
+        }
+    }
+
+    // 副对角线方向（/）
+    for start_row in 0..=size - len {
+        for start_col in (len - 1)..size {
+            total += 1;
+            let mut ok = true;
+            let mut all_checked = true;
+            for d in 0..len {
+                let row = start_row + d;
+                let col = start_col - d;
+                if state.is_unchecked(row, col) {
+                    ok = false;
+                    break;
+                }
+                if !state.is_checked(row, col) {
+                    all_checked = false;
+                }
+            }
+            if ok {
+                possible += 1;
+                if all_checked {
+                    guaranteed += 1;
+                }
+            }
+        }
+    }
+
+    (total, possible, guaranteed)
 }
 
 #[cfg(test)]
