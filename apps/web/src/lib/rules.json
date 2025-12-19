@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "colors": {
+    "Red": 0,
+    "Blue": 1,
+    "Black": 2,
+    "Green": 3,
+    "Yellow": 4,
+    "Purple": 5,
+    "White": 6,
+    "Orange": 7,
+    "Cyan": 8
+  },
+  "rules": [
+    {
+      "id": "red",
+      "name": "红格",
+      "appliesWhen": "always",
+      "description": "周围（八邻）至少有一个被勾选的格子。"
+    },
+    {
+      "id": "blue",
+      "name": "蓝格",
+      "appliesWhen": "always",
+      "description": "周围（八邻）被勾选的格子不得超过两个。"
+    },
+    {
+      "id": "green",
+      "name": "绿格",
+      "appliesWhen": "always",
+      "description": "所在行的勾选总数必须等于所在列的勾选总数。"
+    },
+    {
+      "id": "yellow",
+      "name": "黄格",
+      "appliesWhen": "always",
+      "description": "两条交叉对角线（从黄格向四角延伸）的勾选总数必须相等。"
+    },
+    {
+      "id": "purple",
+      "name": "紫格",
+      "appliesWhen": "always",
+      "description": "周围（八邻）被勾选的格子数量必须为奇数。"
+    },
+    {
+      "id": "orange",
+      "name": "橙格",
+      "appliesWhen": "always",
+      "description": "周围（八邻）被勾选的格子数量必须为偶数。"
+    },
+    {
+      "id": "cyan",
+      "name": "青格",
+      "appliesWhen": "checkedOnly",
+      "description": "当青格被勾选时，上下左右（四邻）至少有一个被勾选的格子。"
+    },
+    {
+      "id": "black",
+      "name": "黑格",
+      "appliesWhen": "always",
+      "description": "黑格必须被勾选。"
+    },
+    {
+      "id": "bingo",
+      "name": "五连线",
+      "appliesWhen": "goal",
+      "description": "满足所有约束的同时，达成至少一条完整的五连线（横/竖/两条对角线）。"
+    }
+  ]
+}
+

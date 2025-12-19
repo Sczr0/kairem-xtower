@@ -1,0 +1,9 @@
+/target
+/.codex
+
+/apps/web/node_modules
+/apps/web/.svelte-kit
+/apps/web/build
+/apps/web/src/lib/wasm/pkg
+/crates/engine/pkg
+/crates/engine/src/lib/wasm/pkg
