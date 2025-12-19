@@ -188,12 +188,20 @@ pub(crate) struct HumanDifficultyAnalysis {
     /// 主路径上的逻辑传播开销（不包含“反证分支”的开销）。
     pub logic_propagate_rounds: u64,
     pub logic_assignments_propagated: u64,
+    /// 发生过“推出至少 1 个强制结论”的逻辑爆发次数（用于刻画“推得动 -> 卡住 -> 再推得动”的断档感）。
+    pub logic_bursts: u32,
+    pub max_logic_burst_size: u32,
     pub logic_rule_trigger_counts: std::collections::HashMap<RuleType, u64>,
     pub logic_first_trigger_counts: std::collections::HashMap<RuleType, u64>,
 
     /// 反证（假设某格取值）走到矛盾所消耗的传播开销。
     pub contradiction_propagate_rounds: u64,
     pub contradiction_assignments_propagated: u64,
+    /// 每次能做反证推出强制结论时，“可用入口”有多稀缺（越稀缺，人越容易卡住）。
+    pub contradiction_entry_total_assumptions: u32,
+    pub contradiction_entry_candidate_assumptions: u32,
+    pub contradiction_entry_scarcity_sum: f64,
+    pub contradiction_entry_scarcity_max: f64,
 
     /// 通过“假设 -> 推理 -> 矛盾”得到的强制步数（人类常见的反证法）。
     pub forced_by_contradiction: u32,
@@ -495,7 +503,7 @@ impl Solver {
 
         // 只做“人类常用”的逻辑阶段：传播 + 反证推出强制。
         loop {
-            let Some((cell, forced_checked, contradiction_obs)) =
+            let Some((cell, forced_checked, contradiction_obs, (unknown_cells, candidate_assumptions))) =
                 self.find_forced_by_contradiction(&state, &mut budget)
             else {
                 break;
@@ -503,6 +511,22 @@ impl Solver {
 
             analysis.forced_by_contradiction += 1;
             contradiction_obs.merge_into_contradiction(&mut analysis);
+
+            // “断档”稀缺度：可用入口越少，人类越容易卡住。
+            // 用 log2(total/candidates) 近似“需要试多少次/观察多久”。
+            let total_assumptions = unknown_cells.saturating_mul(2);
+            analysis.contradiction_entry_total_assumptions = analysis
+                .contradiction_entry_total_assumptions
+                .saturating_add(total_assumptions);
+            analysis.contradiction_entry_candidate_assumptions = analysis
+                .contradiction_entry_candidate_assumptions
+                .saturating_add(candidate_assumptions);
+            if total_assumptions > 0 && candidate_assumptions > 0 {
+                let scarcity = (total_assumptions as f64 / candidate_assumptions as f64).log2();
+                analysis.contradiction_entry_scarcity_sum += scarcity;
+                analysis.contradiction_entry_scarcity_max =
+                    analysis.contradiction_entry_scarcity_max.max(scarcity);
+            }
 
             let assign_res = if forced_checked {
                 state.set_checked_id(cell)
@@ -555,6 +579,12 @@ impl Solver {
         if !self.propagate_to_fixpoint(state, &mut obs) {
             return None;
         }
+
+        let burst_size = obs.assignments_propagated.min(u32::MAX as u64) as u32;
+        if burst_size > 0 {
+            analysis.logic_bursts = analysis.logic_bursts.saturating_add(1);
+            analysis.max_logic_burst_size = analysis.max_logic_burst_size.max(burst_size);
+        }
         obs.merge_into_analysis(analysis);
         Some(())
     }
@@ -563,22 +593,40 @@ impl Solver {
         &self,
         state: &SolverState,
         budget: &mut u32,
-    ) -> Option<(usize, bool, PropagationObserver)> {
+    ) -> Option<(usize, bool, PropagationObserver, (u32, u32))> {
+        // 统计“断档”稀缺度：在当前状态下，做一次“单步反证”共有多少可用入口？
+        // - total_assumptions = 未知格子数 * 2
+        // - candidate_assumptions = 假设后能直接导出矛盾的入口数
+        //   （每个未知格子最多只有 1 个方向会矛盾，否则就是无解）
+        let mut unknown_cells = 0u32;
+        let mut candidate_assumptions = 0u32;
+
+        let mut first_found: Option<(usize, bool, PropagationObserver)> = None;
         for &cell in &self.rules.decision_order {
             if !state.is_unknown_id(cell) {
                 continue;
             }
+            unknown_cells = unknown_cells.saturating_add(1);
 
             // 假设“不勾选” -> 若矛盾，则强制“勾选”。
             if let Some(contradiction) = self.contradiction_proof(state, cell, false, budget) {
-                return Some((cell, true, contradiction));
+                candidate_assumptions = candidate_assumptions.saturating_add(1);
+                if first_found.is_none() {
+                    first_found = Some((cell, true, contradiction));
+                }
             }
             // 假设“勾选” -> 若矛盾，则强制“不勾选”。
             if let Some(contradiction) = self.contradiction_proof(state, cell, true, budget) {
-                return Some((cell, false, contradiction));
+                candidate_assumptions = candidate_assumptions.saturating_add(1);
+                if first_found.is_none() {
+                    first_found = Some((cell, false, contradiction));
+                }
             }
         }
-        None
+
+        first_found.map(|(cell, forced_checked, obs)| {
+            (cell, forced_checked, obs, (unknown_cells, candidate_assumptions))
+        })
     }
 
     fn contradiction_proof(

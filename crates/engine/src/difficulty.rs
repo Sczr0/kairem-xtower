@@ -64,6 +64,8 @@ pub struct HumanDifficultyStats {
 
     pub logic_propagate_rounds: u32,
     pub logic_assignments_propagated: u32,
+    pub logic_bursts: u32,
+    pub max_logic_burst_size: u32,
 
     pub logic_rule_trigger_counts: std::collections::HashMap<String, u32>,
     pub logic_first_trigger_counts: std::collections::HashMap<String, u32>,
@@ -71,6 +73,10 @@ pub struct HumanDifficultyStats {
     pub contradiction_propagate_rounds: u32,
     pub contradiction_assignments_propagated: u32,
     pub forced_by_contradiction: u32,
+    pub contradiction_entry_total_assumptions: u32,
+    pub contradiction_entry_candidate_assumptions: u32,
+    pub contradiction_entry_scarcity_sum: f64,
+    pub contradiction_entry_scarcity_max: f64,
 
     pub guesses: u32,
     pub max_guess_depth: u32,
@@ -132,13 +138,25 @@ fn difficulty_score_human(h: &HumanDifficultyAnalysis) -> u32 {
     let contradiction_component =
         ((h.forced_by_contradiction as f64) * 4.0 + contradiction_work.sqrt() * 1.6).min(20.0);
 
+    // “断档”惩罚：反证入口越稀缺，越像“推了一段然后完全卡住，需要找很久切入点”。
+    let gap_component = (h.contradiction_entry_scarcity_sum * 2.0).min(20.0);
+
+    // 推理爆发次数越多，越容易形成多段式体验（多次“推得动/推不动”切换）。
+    let burst_component = ((h.logic_bursts.saturating_sub(1)) as f64 * 1.5).min(10.0);
+
     let guess_component = if h.guesses == 0 {
         0.0
     } else {
         (25.0 + ((h.guesses - 1) as f64) * 18.0).min(60.0)
     };
 
-    let total = 1.0 + logic_component + bingo_component + contradiction_component + guess_component;
+    let total = 1.0
+        + logic_component
+        + bingo_component
+        + contradiction_component
+        + gap_component
+        + burst_component
+        + guess_component;
     total.round().clamp(1.0, 100.0) as u32
 }
 
@@ -253,6 +271,8 @@ pub fn difficulty_report(color_grid: &[u8]) -> Result<DifficultyReport, Difficul
 
                 logic_propagate_rounds: human.logic_propagate_rounds.min(u32::MAX as u64) as u32,
                 logic_assignments_propagated: human.logic_assignments_propagated.min(u32::MAX as u64) as u32,
+                logic_bursts: human.logic_bursts,
+                max_logic_burst_size: human.max_logic_burst_size,
 
                 logic_rule_trigger_counts,
                 logic_first_trigger_counts,
@@ -262,6 +282,10 @@ pub fn difficulty_report(color_grid: &[u8]) -> Result<DifficultyReport, Difficul
                     .contradiction_assignments_propagated
                     .min(u32::MAX as u64) as u32,
                 forced_by_contradiction: human.forced_by_contradiction,
+                contradiction_entry_total_assumptions: human.contradiction_entry_total_assumptions,
+                contradiction_entry_candidate_assumptions: human.contradiction_entry_candidate_assumptions,
+                contradiction_entry_scarcity_sum: human.contradiction_entry_scarcity_sum,
+                contradiction_entry_scarcity_max: human.contradiction_entry_scarcity_max,
 
                 guesses: human.guesses,
                 max_guess_depth: human.max_guess_depth,
