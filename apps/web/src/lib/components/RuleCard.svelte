@@ -42,21 +42,22 @@
 		display: flex;
 		gap: 12px;
 		padding: 12px;
-		border-radius: 12px;
-		border: 1px solid rgba(148, 163, 184, 0.25);
-		background: rgba(248, 250, 252, 0.9);
+		border-radius: var(--radius-md);
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(248, 250, 252, 0.04);
+		box-shadow: var(--inset-highlight);
 		transition:
 			border-color 150ms ease,
 			box-shadow 150ms ease,
-			transform 150ms ease,
 			background-color 150ms ease;
 	}
 
 	.rule-card.highlighted {
-		background: #ffffff;
-		border-color: rgba(15, 23, 42, 0.25);
-		box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
-		transform: translateY(-1px);
+		background: rgba(248, 250, 252, 0.06);
+		border-color: rgba(248, 250, 252, 0.26);
+		border-color: color-mix(in srgb, var(--swatch) 55%, rgba(248, 250, 252, 0.26));
+		box-shadow: var(--inset-highlight), 0 0 0 3px rgba(248, 250, 252, 0.08);
+		box-shadow: var(--inset-highlight), 0 0 0 3px color-mix(in srgb, var(--swatch) 22%, transparent);
 	}
 
 	.swatch {
@@ -65,6 +66,7 @@
 		border-radius: 4px;
 		background: var(--swatch);
 		box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--swatch) 28%, transparent);
 		margin-top: 4px;
 		flex-shrink: 0;
 	}
@@ -86,7 +88,7 @@
 		font-weight: 750;
 		font-size: 0.9rem;
 		letter-spacing: -0.01em;
-		color: #0f172a;
+		color: rgba(248, 250, 252, 0.92);
 	}
 
 	.badge {
@@ -99,26 +101,26 @@
 	}
 
 	.badge.always {
-		background: rgba(148, 163, 184, 0.18);
-		color: #334155;
-		border: 1px solid rgba(148, 163, 184, 0.25);
+		background: rgba(148, 163, 184, 0.12);
+		color: rgba(248, 250, 252, 0.82);
+		border: 1px solid rgba(148, 163, 184, 0.22);
 	}
 
 	.badge.checked {
-		background: rgba(2, 132, 199, 0.12);
-		color: #0369a1;
-		border: 1px solid rgba(2, 132, 199, 0.18);
+		background: rgba(56, 189, 248, 0.12);
+		color: rgba(224, 242, 254, 0.95);
+		border: 1px solid rgba(56, 189, 248, 0.22);
 	}
 
 	.badge.goal {
-		background: rgba(245, 158, 11, 0.16);
-		color: #92400e;
-		border: 1px solid rgba(245, 158, 11, 0.22);
+		background: rgba(234, 179, 8, 0.14);
+		color: rgba(254, 243, 199, 0.95);
+		border: 1px solid rgba(234, 179, 8, 0.22);
 	}
 
 	.desc {
 		font-size: 0.82rem;
-		color: #64748b;
+		color: var(--muted);
 		line-height: 1.45;
 	}
 </style>

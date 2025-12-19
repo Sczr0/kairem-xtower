@@ -46,7 +46,7 @@
 	}
 </script>
 
-<div class="matrix shadow-xl" role="grid" aria-label="5x5 矩阵">
+<div class="matrix" role="grid" aria-label="5x5 矩阵">
 	{#each indices as i}
 		<div class="cell-wrapper">
 			<button
@@ -96,12 +96,10 @@
 		grid-template-columns: repeat(5, 100px);
 		gap: 10px;
 		justify-content: start;
-		background: #f1f5f9;
-		padding: 20px;
-		border-radius: 24px;
-		box-shadow:
-			0 20px 25px -5px rgb(0 0 0 / 0.1),
-			0 8px 10px -6px rgb(0 0 0 / 0.1);
+		background: transparent;
+		padding: 0;
+		border-radius: 0;
+		box-shadow: none;
 	}
 
 	.cell-wrapper {
@@ -114,16 +112,17 @@
 		left: 50%;
 		transform: translateX(-50%);
 		margin-bottom: 8px;
-		background: #1e293b;
-		color: #f8fafc;
+		background: rgba(2, 6, 23, 0.92);
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		color: rgba(248, 250, 252, 0.92);
 		padding: 8px 12px;
-		border-radius: 6px;
+		border-radius: 8px;
 		font-size: 0.75rem;
 		line-height: 1.4;
 		white-space: nowrap;
 		z-index: 50;
 		pointer-events: none;
-		box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+		box-shadow: var(--shadow-chip), var(--inset-highlight);
 		max-width: 200px;
 		white-space: normal;
 		text-align: center;
@@ -137,7 +136,7 @@
 		transform: translateX(-50%);
 		border-width: 6px;
 		border-style: solid;
-		border-color: #1e293b transparent transparent transparent;
+		border-color: rgba(2, 6, 23, 0.92) transparent transparent transparent;
 	}
 
 	@keyframes fadeIn {
@@ -149,7 +148,7 @@
 		.matrix {
 			grid-template-columns: repeat(5, 60px);
 			gap: 6px;
-			padding: 12px;
+			padding: 0;
 		}
 	}
 
@@ -157,30 +156,33 @@
 		position: relative;
 		width: 100px;
 		height: 100px;
-		border-radius: 12px;
-		border: 1px solid transparent;
-		background-color: #ffffff;
-		box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+		border-radius: 10px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		background: linear-gradient(180deg, rgba(248, 250, 252, 0.1), rgba(248, 250, 252, 0.04));
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.06) inset,
+			0 -1px 0 rgba(0, 0, 0, 0.55) inset;
 		cursor: pointer;
 		display: grid;
 		place-items: center;
-		color: #0f172a;
+		color: rgba(248, 250, 252, 0.92);
 		overflow: hidden;
 		transition:
-			background-color 200ms ease,
-			transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
-			box-shadow 200ms ease,
-			border-color 200ms ease;
+			background-color 160ms ease,
+			border-color 160ms ease,
+			transform 80ms ease;
 	}
 
 	.cell:hover:not(:disabled) {
-		transform: translateY(-2px);
-		box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -1px rgb(0 0 0 / 0.06);
-		border-color: #cbd5e1;
+		border-color: rgba(56, 189, 248, 0.45);
+		background: linear-gradient(180deg, rgba(248, 250, 252, 0.14), rgba(248, 250, 252, 0.05));
 	}
 
 	.cell:active:not(:disabled) {
-		transform: scale(0.95);
+		transform: translateY(1px);
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.05) inset,
+			0 1px 0 rgba(0, 0, 0, 0.55) inset;
 	}
 
 	@media (max-width: 720px) {
@@ -193,7 +195,9 @@
 
 	.cell:disabled {
 		cursor: not-allowed;
-		opacity: 0.9;
+		opacity: 0.85;
+		background: linear-gradient(180deg, rgba(2, 6, 23, 0.55), rgba(2, 6, 23, 0.35));
+		border-color: rgba(148, 163, 184, 0.18);
 	}
 
 	.color-bar {
@@ -213,28 +217,25 @@
 		position: absolute;
 		inset: 0;
 		background: var(--cell-color);
-		opacity: 0.05;
+		opacity: 0.07;
 		pointer-events: none;
 		transition: opacity 0.2s;
 	}
 
 	.cell.checked {
-		background-color: #f8fafc; /* slate-50 */
-		color: #334155; /* slate-700 */
-		border-color: #475569; /* slate-600 */
-		border-width: 2px;
-		transform: scale(1);
+		background: linear-gradient(180deg, rgba(248, 250, 252, 0.16), rgba(248, 250, 252, 0.06));
+		color: rgba(248, 250, 252, 0.92);
+		border-color: rgba(248, 250, 252, 0.5);
 	}
 
 	/* Keep the tint visible but maybe slightly adjusted if needed,
 	   or just let it sit on top of slate-50 */
 	.cell.checked::before {
-		opacity: 0.1;
+		opacity: 0.14;
 	}
 	
 	.cell.checked:hover:not(:disabled) {
-		background-color: #f1f5f9; /* slate-100 */
-		border-color: #334155; /* slate-700 */
+		border-color: rgba(248, 250, 252, 0.72);
 	}
 	
 	.cell.checked .color-bar {
@@ -261,7 +262,7 @@
 	.cell.invalid {
 		/* border-color: var(--danger); */
 		animation: shake 240ms ease-in-out;
-		outline: 2px solid #ef4444;
+		outline: 2px solid var(--danger);
 		outline-offset: 2px;
 		z-index: 10;
 	}
@@ -272,7 +273,7 @@
 		right: 4px;
 		width: 16px;
 		height: 16px;
-		background: #ef4444;
+		background: var(--danger);
 		color: white;
 		font-size: 10px;
 		font-weight: bold;

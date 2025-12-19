@@ -1,15 +1,35 @@
 :root {
-	--bg: #ffffff;
-	--dot: #e5e7eb;
-	--text: #0f172a;
-	--muted: #64748b;
-	--card: #ffffff;
-	--border: #e2e8f0;
-	--shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-	--danger: #ef4444;
+	color-scheme: dark;
+
+	--bg: #070a14;
+	--bg-2: #0a1022;
+	--text: rgba(248, 250, 252, 0.94);
+	--muted: rgba(226, 232, 240, 0.7);
+	--muted-2: rgba(226, 232, 240, 0.55);
+
+	--panel: rgba(15, 23, 42, 0.78);
+	--panel-2: rgba(15, 23, 42, 0.92);
+	--border: rgba(148, 163, 184, 0.18);
+	--border-2: rgba(148, 163, 184, 0.28);
+
+	/* 阴影只用于关键层级，避免“脏”与过度漂浮感 */
+	--shadow-panel: 0 24px 60px rgba(2, 6, 23, 0.55);
+	--shadow-soft: 0 10px 24px rgba(2, 6, 23, 0.42);
+	--shadow-chip: 0 6px 14px rgba(2, 6, 23, 0.35);
+	--inset-highlight: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+	--inset-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4) inset;
+
+	--radius-sm: 10px;
+	--radius-md: 14px;
+	--radius-lg: 18px;
+	--radius-xl: 22px;
+
+	--focus-ring: 0 0 0 3px rgba(56, 189, 248, 0.25);
+	--danger: #fb7185;
+
 	--mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-	--sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans",
-		"Apple Color Emoji", "Segoe UI Emoji";
+	--sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
+		"Liberation Sans", "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 html,
@@ -22,14 +42,27 @@ body {
 	font-family: var(--sans);
 	color: var(--text);
 	background-color: var(--bg);
-	background-image: radial-gradient(var(--dot) 1px, transparent 1px);
-	background-size: 24px 24px;
-	background-position: 0 0;
+	background-image:
+		radial-gradient(1100px circle at 12% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+		radial-gradient(900px circle at 105% 0%, rgba(168, 85, 247, 0.14), transparent 52%),
+		radial-gradient(800px circle at 60% 120%, rgba(34, 197, 94, 0.1), transparent 55%),
+		linear-gradient(180deg, #050712, var(--bg));
+	background-attachment: fixed;
 }
 
 a {
 	color: inherit;
 	text-decoration: none;
+}
+
+.main {
+	min-height: 100vh;
+	padding: 32px 20px 56px;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+	outline: 2px solid rgba(56, 189, 248, 0.8);
+	outline-offset: 2px;
 }
 
 .container {
@@ -39,8 +72,7 @@ a {
 }
 
 .sidebar {
-	background: rgba(255, 255, 255, 0.7);
-	backdrop-filter: blur(10px);
+	background: var(--panel);
 	border-right: 1px solid var(--border);
 	padding: 20px 16px;
 }
@@ -57,7 +89,7 @@ a {
 	width: 14px;
 	height: 14px;
 	border-radius: 4px;
-	background: #0f172a;
+	background: rgba(248, 250, 252, 0.9);
 }
 
 .nav {
@@ -73,16 +105,12 @@ a {
 	align-items: center;
 	gap: 10px;
 	padding: 8px 10px;
-	border-radius: 10px;
+	border-radius: var(--radius-sm);
 }
 
 .nav a:hover {
-	background: rgba(15, 23, 42, 0.04);
+	background: rgba(248, 250, 252, 0.06);
 	color: var(--text);
-}
-
-.main {
-	padding: 28px 28px 40px;
 }
 
 .title {
@@ -107,10 +135,10 @@ a {
 }
 
 .card {
-	background: var(--card);
+	background: var(--panel);
 	border: 1px solid var(--border);
-	border-radius: 14px;
-	box-shadow: var(--shadow);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-chip), var(--inset-highlight);
 	padding: 16px;
 }
 
@@ -126,9 +154,9 @@ a {
 .pill {
 	font-family: var(--mono);
 	font-size: 12px;
-	color: #0f172a;
-	background: rgba(148, 163, 184, 0.18);
-	border: 1px solid rgba(148, 163, 184, 0.25);
+	color: rgba(248, 250, 252, 0.9);
+	background: rgba(148, 163, 184, 0.16);
+	border: 1px solid rgba(148, 163, 184, 0.22);
 	padding: 3px 8px;
 	border-radius: 999px;
 }
@@ -138,4 +166,3 @@ a {
 	font-family: var(--mono);
 	font-size: 12px;
 }
-
