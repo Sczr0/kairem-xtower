@@ -1,0 +1,7 @@
+/_app/immutable/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/_app/immutable/assets/*.wasm
+  Content-Type: application/wasm
+  X-Content-Type-Options: nosniff
+
