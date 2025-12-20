@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="72" y="72" width="1056" height="486" rx="36" fill="#0f172a" stroke="#243044" stroke-width="2"/>
+
+  <rect x="110" y="110" width="96" height="96" rx="22" fill="url(#accent)"/>
+  <text x="230" y="180" fill="#e5e7eb" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="56" font-weight="800">聪明Bingo</text>
+  <text x="110" y="265" fill="#9ca3af" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="28">
+    每日逻辑益智游戏 · 达成 Bingo · 支持种子分享
+  </text>
+
+  <g transform="translate(110,315)">
+    <rect x="0" y="0" width="780" height="210" rx="20" fill="#0b1220" stroke="#1f2937"/>
+    <g opacity="0.95">
+      <rect x="18" y="18" width="54" height="54" rx="12" fill="#60a5fa"/>
+      <rect x="84" y="18" width="54" height="54" rx="12" fill="#a78bfa"/>
+      <rect x="150" y="18" width="54" height="54" rx="12" fill="#34d399"/>
+      <rect x="216" y="18" width="54" height="54" rx="12" fill="#fbbf24"/>
+      <rect x="282" y="18" width="54" height="54" rx="12" fill="#fb7185"/>
+    </g>
+    <text x="18" y="140" fill="#e5e7eb" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="34" font-weight="750">
+      轻量 · 规则清晰 · 分享即玩
+    </text>
+    <text x="18" y="182" fill="#9ca3af" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="22">
+      kairem.xtower.site
+    </text>
+  </g>
+</svg>
+

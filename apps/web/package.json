@@ -9,6 +9,7 @@
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test",
     "wasm:build": "wasm-pack build ../../crates/engine --target web --out-dir ../../apps/web/src/lib/wasm/pkg"
   },
   "devDependencies": {
