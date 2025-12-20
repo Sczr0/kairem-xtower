@@ -77,6 +77,10 @@ pub struct HumanDifficultyStats {
     pub contradiction_entry_candidate_assumptions: u32,
     pub contradiction_entry_scarcity_sum: f64,
     pub contradiction_entry_scarcity_max: f64,
+    pub probe_total_assumptions: u32,
+    pub probe_candidate_assumptions: u32,
+    pub probe_scarcity: f64,
+    pub probe_max_burst_size: u32,
 
     pub guesses: u32,
     pub max_guess_depth: u32,
@@ -144,6 +148,9 @@ fn difficulty_score_human(h: &HumanDifficultyAnalysis) -> u32 {
     // 推理爆发次数越多，越容易形成多段式体验（多次“推得动/推不动”切换）。
     let burst_component = ((h.logic_bursts.saturating_sub(1)) as f64 * 1.5).min(10.0);
 
+    // “随手填一个格”入口稀缺：用于刻画“卡住需要试/观察很久才能继续”的断档感。
+    let probe_gap_component = (h.probe_scarcity * 3.0).min(20.0);
+
     let guess_component = if h.guesses == 0 {
         0.0
     } else {
@@ -156,6 +163,7 @@ fn difficulty_score_human(h: &HumanDifficultyAnalysis) -> u32 {
         + contradiction_component
         + gap_component
         + burst_component
+        + probe_gap_component
         + guess_component;
     total.round().clamp(1.0, 100.0) as u32
 }
@@ -286,6 +294,10 @@ pub fn difficulty_report(color_grid: &[u8]) -> Result<DifficultyReport, Difficul
                 contradiction_entry_candidate_assumptions: human.contradiction_entry_candidate_assumptions,
                 contradiction_entry_scarcity_sum: human.contradiction_entry_scarcity_sum,
                 contradiction_entry_scarcity_max: human.contradiction_entry_scarcity_max,
+                probe_total_assumptions: human.probe_total_assumptions,
+                probe_candidate_assumptions: human.probe_candidate_assumptions,
+                probe_scarcity: human.probe_scarcity,
+                probe_max_burst_size: human.probe_max_burst_size,
 
                 guesses: human.guesses,
                 max_guess_depth: human.max_guess_depth,

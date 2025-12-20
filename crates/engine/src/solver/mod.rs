@@ -203,6 +203,15 @@ pub(crate) struct HumanDifficultyAnalysis {
     pub contradiction_entry_scarcity_sum: f64,
     pub contradiction_entry_scarcity_max: f64,
 
+    /// 当“既推不动、也没有单步反证入口”时，统计“随手填一个格”能否开启新一轮推导。
+    /// - total_assumptions = 未知格子数 * 2
+    /// - candidate_assumptions = 假设后能引发至少 1 个传播赋值（不含该假设本身）的入口数
+    /// - scarcity = log2(total/candidates)，越大越“断档”
+    pub probe_total_assumptions: u32,
+    pub probe_candidate_assumptions: u32,
+    pub probe_scarcity: f64,
+    pub probe_max_burst_size: u32,
+
     /// 通过“假设 -> 推理 -> 矛盾”得到的强制步数（人类常见的反证法）。
     pub forced_by_contradiction: u32,
 
@@ -545,6 +554,20 @@ impl Solver {
             }
         }
 
+        // 如果卡住：没有强制步可做，估计“填一个不相关的格子”能否开启新一轮推导。
+        // 这能区分：
+        // - 真·自由题（怎么填都推不动，但也不太会卡）
+        // - 断档题（只有极少数入口能开启下一段推导）
+        if !state.is_fully_decided() {
+            let (total, candidates, max_burst) = self.probe_progress_candidates(&state, &mut budget);
+            analysis.probe_total_assumptions = total;
+            analysis.probe_candidate_assumptions = candidates;
+            analysis.probe_max_burst_size = max_burst;
+            if total > 0 && candidates > 0 {
+                analysis.probe_scarcity = (total as f64 / candidates as f64).log2();
+            }
+        }
+
         analysis.solved = state.is_fully_decided();
         analysis.exhausted_budget = budget == 0;
 
@@ -656,6 +679,51 @@ impl Solver {
         let mut obs = PropagationObserver::default();
         let ok = self.propagate_to_fixpoint(&mut fork, &mut obs);
         if ok { None } else { Some(obs) }
+    }
+
+    fn probe_progress_candidates(&self, state: &SolverState, budget: &mut u32) -> (u32, u32, u32) {
+        let mut unknown_cells = 0u32;
+        let mut candidate_assumptions = 0u32;
+        let mut max_burst = 0u32;
+
+        for &cell in &self.rules.decision_order {
+            if !state.is_unknown_id(cell) {
+                continue;
+            }
+            unknown_cells = unknown_cells.saturating_add(1);
+
+            for assume_checked in [false, true] {
+                if *budget == 0 {
+                    break;
+                }
+                *budget -= 1;
+
+                let mut fork = state.clone();
+                let assign_res = if assume_checked {
+                    fork.set_checked_id(cell)
+                } else {
+                    fork.set_unchecked_id(cell)
+                };
+                if assign_res.is_err() {
+                    // 当前状态下该假设直接矛盾：理论上应该已经能被反证推出强制，保守忽略。
+                    continue;
+                }
+
+                let mut obs = PropagationObserver::default();
+                if !self.propagate_to_fixpoint(&mut fork, &mut obs) {
+                    // 假设后产生矛盾：同样属于“有入口可走”，但已由反证统计覆盖。
+                    continue;
+                }
+
+                let burst = obs.assignments_propagated.min(u32::MAX as u64) as u32;
+                if burst > 0 {
+                    candidate_assumptions = candidate_assumptions.saturating_add(1);
+                    max_burst = max_burst.max(burst);
+                }
+            }
+        }
+
+        (unknown_cells.saturating_mul(2), candidate_assumptions, max_burst)
     }
 
     fn search(
