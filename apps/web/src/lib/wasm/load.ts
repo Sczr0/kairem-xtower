@@ -36,7 +36,19 @@ export async function loadEngine(): Promise<Engine> {
 	try {
 		// wasm-pack 输出会生成 `pkg/` 目录（本仓库默认不提交产物）。
 		// @ts-ignore pkg 由 wasm-pack 生成
-		const mod = await import('$lib/wasm/pkg/kairm_engine');
+		const mod = await import('$lib/wasm/pkg/kairm_engine.js');
+		// 优先以 URL 方式加载 .wasm，确保网络面板能看到 wasm 请求（便于排查）
+		let wasmUrl: string | null = null;
+		try {
+			// Vite 资产导入：返回最终构建后的静态资源 URL
+			wasmUrl = (await import('$lib/wasm/pkg/kairm_engine_bg.wasm?url')).default as string;
+		} catch {}
+		const init = (mod as any).default;
+		if (typeof init === 'function') {
+			// 显式传入 URL，避免 bundler 内部定位失败导致未发起 wasm 请求
+			if (wasmUrl) await init(wasmUrl);
+			else await init();
+		}
 		return mod as Engine;
 	} catch (e) {
 		throw new Error(

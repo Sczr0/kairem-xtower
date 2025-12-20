@@ -3,16 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm wasm:build",
+    "prebuild": "pnpm wasm:build",
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "svelte-kit sync && vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "wasm:build": "wasm-pack build ../../crates/engine --target bundler --out-dir ../../apps/web/src/lib/wasm/pkg"
+    "wasm:build": "wasm-pack build ../../crates/engine --target web --out-dir ../../apps/web/src/lib/wasm/pkg"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.12.0",
-    "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@typescript-eslint/types": "^8.0.0",
     "@types/node": "^20.12.12",
     "svelte": "^5.0.0",
@@ -23,6 +25,6 @@
     "wasm-pack": "^0.12.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": ["esbuild", "wasm-pack"]
   }
 }
