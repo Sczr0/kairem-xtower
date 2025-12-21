@@ -59,6 +59,8 @@
 	let history: HistoryState = createHistory(0);
 	let moveCount = 0;
 	let hintCount = 0;
+	let timeMs = 0;
+	let timerStartedAt: number | null = null;
 	let solvedAt: string | null = null;
 	let progressEntries: ProgressEntry[] = [];
 	let keyboardBound = false;
@@ -72,6 +74,8 @@
 	let hintAction: 'check' | 'uncheck' | null = null;
 	let hintLoading = false;
 	let hintExplain: string | null = null;
+	let totalTimeMs = 0;
+	let clockTick = 0;
 
 	type Rule = UiRule;
 	const allRules = (rules.rules ?? []) as Rule[];
@@ -113,6 +117,14 @@
 	$: hasMarks = marks.some((v) => v !== 0);
 	$: hintExplain = buildHintExplain(hint);
 	$: currentProgressKey = safeCurrentPuzzleKey();
+	$: totalTimeMs = snapshotTimeMs(clockTick || Date.now());
+
+	function snapshotTimeMs(now = Date.now()): number {
+		if (timerStartedAt === null) return Math.max(0, timeMs);
+		const delta = now - timerStartedAt;
+		if (!Number.isFinite(delta) || delta <= 0) return Math.max(0, timeMs);
+		return Math.max(0, timeMs + delta);
+	}
 
 	function shanghaiDateYmd(now = new Date()): string {
 		const fmt = new Intl.DateTimeFormat('zh-CN', {
@@ -140,6 +152,19 @@
 		}
 	}
 
+	function parseDateYmd(raw: string): string | null {
+		const s = raw.trim();
+		if (!s) return null;
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+		const parts = s.split('-').map((x) => Number(x));
+		if (parts.length !== 3) return null;
+		const [y, m, d] = parts;
+		if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+		if (m < 1 || m > 12) return null;
+		if (d < 1 || d > 31) return null;
+		return s;
+	}
+
 	function shortSeed(v: bigint): string {
 		const s = v.toString();
 		if (s.length <= 12) return s;
@@ -153,6 +178,16 @@
 		return `${s.slice(0, 10)}…${s.slice(-6)}`;
 	}
 
+	function formatDuration(ms: number): string {
+		const t = Math.max(0, Math.floor(ms / 1000));
+		const s = t % 60;
+		const m = Math.floor(t / 60) % 60;
+		const h = Math.floor(t / 3600);
+		const pad2 = (v: number) => String(v).padStart(2, '0');
+		if (h > 0) return `${h}:${pad2(m)}:${pad2(s)}`;
+		return `${m}:${pad2(s)}`;
+	}
+
 	function safeLevelCodeForDisplay(): string {
 		try {
 			return levelCode ?? encodeLevel(grid);
@@ -164,6 +199,7 @@
 	function buildSeedUrl(v: bigint): string {
 		if (!browser) return '';
 		const url = new URL(window.location.href);
+		url.searchParams.delete('date');
 		url.searchParams.delete('level');
 		url.searchParams.set('seed', v.toString());
 		return url.toString();
@@ -172,6 +208,7 @@
 	function replaceUrlSeed(v: bigint | null) {
 		if (!browser) return;
 		const url = new URL(window.location.href);
+		url.searchParams.delete('date');
 		url.searchParams.delete('level');
 		if (v === null) url.searchParams.delete('seed');
 		else url.searchParams.set('seed', v.toString());
@@ -181,6 +218,7 @@
 	function buildLevelUrl(code: string): string {
 		if (!browser) return '';
 		const url = new URL(window.location.href);
+		url.searchParams.delete('date');
 		url.searchParams.delete('seed');
 		url.searchParams.set('level', code);
 		return url.toString();
@@ -189,9 +227,29 @@
 	function replaceUrlLevel(code: string | null) {
 		if (!browser) return;
 		const url = new URL(window.location.href);
+		url.searchParams.delete('date');
 		url.searchParams.delete('seed');
 		if (code === null) url.searchParams.delete('level');
 		else url.searchParams.set('level', code);
+		window.history.replaceState({}, '', url.toString());
+	}
+
+	function buildDailyUrl(date: string): string {
+		if (!browser) return '';
+		const url = new URL(window.location.href);
+		url.searchParams.delete('seed');
+		url.searchParams.delete('level');
+		url.searchParams.set('date', date);
+		return url.toString();
+	}
+
+	function replaceUrlDaily(date: string | null) {
+		if (!browser) return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete('seed');
+		url.searchParams.delete('level');
+		if (!date) url.searchParams.delete('date');
+		else url.searchParams.set('date', date);
 		window.history.replaceState({}, '', url.toString());
 	}
 
@@ -217,6 +275,18 @@
 		hint = null;
 		hintIndex = null;
 		hintAction = null;
+	}
+
+	function pauseTimer() {
+		if (timerStartedAt === null) return;
+		timeMs = snapshotTimeMs();
+		timerStartedAt = null;
+	}
+
+	function resumeTimer() {
+		if (timerStartedAt !== null) return;
+		if (solvedAt) return;
+		timerStartedAt = Date.now();
 	}
 
 	function selectAll(event: Event) {
@@ -279,10 +349,18 @@
 		if (!key) return;
 
 		const nowIso = new Date().toISOString();
-		if (isSolved && !solvedAt) solvedAt = nowIso;
+		if (isSolved && !solvedAt) {
+			solvedAt = nowIso;
+			if (timerStartedAt !== null) {
+				timeMs = snapshotTimeMs();
+				timerStartedAt = null;
+			}
+		}
 
 		const kind: ProgressEntry['kind'] =
 			puzzleKind === 'custom' ? 'custom' : puzzleKind === 'daily' ? 'daily' : 'seed';
+
+		const timeMsToSave = isSolved ? Math.max(0, timeMs) : snapshotTimeMs();
 
 		const entry: ProgressEntry = {
 			key,
@@ -296,6 +374,7 @@
 			redo: history.redo,
 			moveCount,
 			hintCount,
+			timeMs: timeMsToSave,
 			solvedAt: solvedAt ?? undefined
 		};
 
@@ -332,7 +411,9 @@
 		marks = normalizeMarks(saved.marks);
 		moveCount = typeof saved.moveCount === 'number' ? saved.moveCount : 0;
 		hintCount = typeof saved.hintCount === 'number' ? saved.hintCount : 0;
+		timeMs = typeof saved.timeMs === 'number' && Number.isFinite(saved.timeMs) ? Math.max(0, saved.timeMs) : 0;
 		solvedAt = typeof saved.solvedAt === 'string' ? saved.solvedAt : null;
+		timerStartedAt = solvedAt ? null : Date.now();
 	}
 
 	function refreshValidate() {
@@ -508,6 +589,8 @@
 		history = createHistory(checkedMask);
 		moveCount = 0;
 		hintCount = 0;
+		timeMs = 0;
+		timerStartedAt = Date.now();
 		solvedAt = null;
 		validate = null;
 		hoveredRuleId = null;
@@ -530,6 +613,8 @@
 		history = createHistory(checkedMask);
 		moveCount = 0;
 		hintCount = 0;
+		timeMs = 0;
+		timerStartedAt = Date.now();
 		solvedAt = null;
 		validate = null;
 		hoveredRuleId = null;
@@ -569,7 +654,7 @@
 		dateYmd = shanghaiDateYmd();
 		const dailySeed = engine.date_to_seed_ymd(dateYmd);
 		await loadPuzzleBySeed(dailySeed);
-		if (opts.updateUrl) replaceUrlSeed(null);
+		if (opts.updateUrl) replaceUrlDaily(null);
 	}
 
 	async function newRandomPuzzle() {
@@ -585,7 +670,7 @@
 		dateYmd = targetDateYmd;
 		const dailySeed = engine.date_to_seed_ymd(dateYmd);
 		await loadPuzzleBySeed(dailySeed);
-		if (opts.updateUrl) replaceUrlSeed(null);
+		if (opts.updateUrl) replaceUrlDaily(targetDateYmd);
 	}
 
 	async function openProgressEntry(entry: ProgressEntry) {
@@ -646,6 +731,8 @@
 		marks = createMarks();
 		moveCount = 0;
 		hintCount = 0;
+		timeMs = 0;
+		timerStartedAt = Date.now();
 		solvedAt = null;
 		refreshValidate();
 		clearHint();
@@ -718,51 +805,93 @@
 		}
 	}
 
-	onMount(async () => {
-		try {
-			engine = await loadEngine();
-			refreshProgressEntries();
-			if (!keyboardBound) {
-				window.addEventListener('keydown', handleGlobalKeyDown);
-				keyboardBound = true;
+	onMount(() => {
+		const onVisibility = () => {
+			if (document.visibilityState === 'hidden') {
+				pauseTimer();
+				persistProgress();
 			}
+			else resumeTimer();
+		};
+		document.addEventListener('visibilitychange', onVisibility);
 
-			const url = new URL(window.location.href);
+		clockTick = Date.now();
+		const clock = setInterval(() => {
+			clockTick = Date.now();
+		}, 1000);
 
-			const rawLevel = url.searchParams.get('level');
-			if (rawLevel !== null) {
-				try {
-					const decoded = decodeLevel(rawLevel);
-					puzzleKind = 'custom';
-					urlSeedError = '';
-					urlLevelError = '';
-					dateYmd = '';
-					loadPuzzleByCustomGrid(decoded.grid as ColorId[], { updateUrl: true, levelCode: rawLevel });
-					return;
-				} catch {
-					urlLevelError = 'level 参数无效，已回退到今日题目';
-					await newDailyPuzzle({ updateUrl: true, keepUrlLevelError: true });
-					return;
-				}
-			}
-
-			const rawSeed = url.searchParams.get('seed');
-			if (rawSeed !== null) {
-				const parsed = parseSeed(rawSeed);
-				if (parsed === null) {
-					urlSeedError = 'seed 参数无效，已回退到今日题目';
-					await newDailyPuzzle({ updateUrl: true, keepUrlSeedError: true });
-					return;
+		(async () => {
+			try {
+				engine = await loadEngine();
+				refreshProgressEntries();
+				if (!keyboardBound) {
+					window.addEventListener('keydown', handleGlobalKeyDown);
+					keyboardBound = true;
 				}
 
-				await newSeedPuzzle(parsed, { updateUrl: true });
-				return;
-			}
+				const url = new URL(window.location.href);
 
-			await newDailyPuzzle();
-		} catch (e) {
-			engineError = String(e);
-		}
+				const rawLevel = url.searchParams.get('level');
+				if (rawLevel !== null) {
+					try {
+						const decoded = decodeLevel(rawLevel);
+						puzzleKind = 'custom';
+						urlSeedError = '';
+						urlLevelError = '';
+						dateYmd = '';
+						loadPuzzleByCustomGrid(decoded.grid as ColorId[], { updateUrl: true, levelCode: rawLevel });
+						return;
+					} catch {
+						urlLevelError = 'level 参数无效，已回退到今日题目';
+						await newDailyPuzzle({ updateUrl: true, keepUrlLevelError: true });
+						return;
+					}
+				}
+
+				const rawSeed = url.searchParams.get('seed');
+				if (rawSeed !== null) {
+					const parsed = parseSeed(rawSeed);
+					if (parsed === null) {
+						urlSeedError = 'seed 参数无效，已回退到今日题目';
+						await newDailyPuzzle({ updateUrl: true, keepUrlSeedError: true });
+						return;
+					}
+
+					await newSeedPuzzle(parsed, { updateUrl: true });
+					return;
+				}
+
+				const rawDate = url.searchParams.get('date');
+				if (rawDate !== null) {
+					const parsed = parseDateYmd(rawDate);
+					if (parsed === null) {
+						urlSeedError = '';
+						urlLevelError = '';
+						await newDailyPuzzle({ updateUrl: true });
+						showToast('date 参数无效，已回退到今日题目');
+						return;
+					}
+
+					try {
+						await loadDailyPuzzleByDate(parsed, { updateUrl: true });
+						return;
+					} catch (e) {
+						await newDailyPuzzle({ updateUrl: true });
+						showToast(`加载每日题失败，已回退到今日题目：${String(e)}`);
+						return;
+					}
+				}
+
+				await newDailyPuzzle();
+			} catch (e) {
+				engineError = String(e);
+			}
+		})();
+
+		return () => {
+			document.removeEventListener('visibilitychange', onVisibility);
+			clearInterval(clock);
+		};
 	});
 </script>
 
@@ -776,6 +905,8 @@
 			    <p class="subtitle">一个轻量逻辑游戏，灵感来源QQ群</p>
             </div>
 			<div class="header-actions">
+				<a class="btn" href="/daily" title="每日题日历">日历</a>
+				<a class="btn" href="/editor" title="关卡编辑器">编辑器</a>
 				<a
 					href="https://github.com/Sczr0/kairem-xtower"
 					target="_blank"
@@ -812,6 +943,7 @@
 										: '--'}
 						</span>
 						<span class="difficulty-chip" title="步数 / 提示次数">{moveCount} / {hintCount}</span>
+						<span class="difficulty-chip" title="用时">{formatDuration(totalTimeMs)}</span>
 						{#if difficulty}
 							<span
 								class="difficulty-chip"

@@ -9,7 +9,11 @@ export const GET: RequestHandler = () => {
 	const now = new Date().toISOString();
 	const body = renderSitemapXml({
 		origin: siteUrl,
-		urls: [{ loc: '/', lastmod: now, changefreq: 'daily', priority: '1.0' }]
+		urls: [
+			{ loc: '/', lastmod: now, changefreq: 'daily', priority: '1.0' },
+			{ loc: '/daily', lastmod: now, changefreq: 'daily', priority: '0.7' },
+			{ loc: '/editor', lastmod: now, changefreq: 'weekly', priority: '0.6' }
+		]
 	});
 
 	return new Response(body, {

@@ -29,6 +29,7 @@ export type ProgressEntry = {
 	redo: number[];
 	moveCount?: number;
 	hintCount?: number;
+	timeMs?: number;
 	solvedAt?: string;
 	createdAt?: string;
 	updatedAt?: string;

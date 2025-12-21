@@ -246,6 +246,7 @@
 			</div>
 		</div>
 		<div class="header-actions">
+			<a class="btn" href="/daily">日历</a>
 			<ThemeToggle />
 		</div>
 	</header>
