@@ -706,6 +706,42 @@ impl Solver {
         out
     }
 
+    /// 在“已有部分勾选”的前提下求解，并返回最多 `limit` 个解（limit=0 视为不限制）。
+    ///
+    /// 约定：
+    /// - `checked_mask` 仅表达“已确认勾选”的集合；未置位的格子仍视为“未知”，而不是“不勾选”；
+    /// - 黑格（Color::Black）依然强制勾选，与 `checked_mask` 无关；
+    /// - 若初始赋值或传播阶段产生矛盾，直接返回空解集。
+    pub fn solve_masks_limit_with_checked_mask(&self, checked_mask: Mask, limit: usize) -> Vec<Mask> {
+        const VALID_CELL_MASK: u32 = (1u32 << CELL_COUNT) - 1;
+        let checked_mask = checked_mask & VALID_CELL_MASK;
+
+        let mut state = SolverState::new(self.rules.size);
+        for &id in &self.rules.black_cells {
+            // 黑格固定勾选；如果冲突交给传播阶段判定即可
+            let _ = state.set_checked_id(id);
+        }
+
+        // 将 checked_mask 视为“已确认勾选”，其余保持未知
+        for &cell in &self.rules.decision_order {
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) != 0 {
+                if state.set_checked_id(cell).is_err() {
+                    return Vec::new();
+                }
+            }
+        }
+
+        let mut obs = ();
+        if !self.propagate_to_fixpoint(&mut state, &mut obs) {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        self.search(state, limit, &mut out, 0, &mut obs);
+        out
+    }
+
     pub(crate) fn analyze_human_difficulty(&self) -> HumanDifficultyAnalysis {
         const BUDGET: u32 = 50_000;
 

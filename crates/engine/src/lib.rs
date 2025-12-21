@@ -11,6 +11,7 @@ mod masks;
 mod solver;
 mod validate;
 
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 pub use colors::{Color, COLOR_COUNT};
@@ -18,6 +19,29 @@ pub use difficulty::{DifficultyError, DifficultyReport};
 pub use generate::GenerateError;
 pub use solver::{HintAction, HintMove, HintResult, HintStatus};
 pub use validate::{ValidateError, ValidateResult};
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct SolutionCountResult {
+    pub count: u32,
+    pub truncated: bool,
+}
+
+fn parse_colors_5x5(color_grid: &[u8]) -> Result<[Color; crate::masks::CELL_COUNT], JsValue> {
+    if color_grid.len() != crate::masks::CELL_COUNT {
+        return Err(JsValue::from_str(&format!(
+            "color_grid 长度必须为 25，得到：{}",
+            color_grid.len()
+        )));
+    }
+
+    let mut colors = [Color::White; crate::masks::CELL_COUNT];
+    for (i, &v) in color_grid.iter().enumerate() {
+        colors[i] = Color::from_u8(v).ok_or_else(|| {
+            JsValue::from_str(&format!("color_grid 含非法颜色编码：index={i}, value={v}"))
+        })?;
+    }
+    Ok(colors)
+}
 
 /// Rust 原生接口：生成 5x5 颜色布局（u8）。
 pub fn generate_puzzle_grid(seed: u64) -> Result<Vec<Vec<u8>>, GenerateError> {
@@ -94,4 +118,70 @@ pub fn hint_next(checked_mask: u32, color_grid: Vec<u8>) -> Result<JsValue, JsVa
     let solver = solver::Solver::new(colors);
     let res = solver.hint_next(checked_mask);
     serde_wasm_bindgen::to_value(&res).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// 统计解的数量（最多枚举到 `limit` 个解）。
+///
+/// 说明：
+/// - 当 `limit=2` 时，足以区分：无解 / 唯一解 / 多解（>=2）；
+/// - 返回的 `count` 不会超过 `limit`（当 `limit=0` 时表示不限制，并返回真实数量，但可能很慢）。
+#[wasm_bindgen]
+pub fn solution_count(color_grid: Vec<u8>, limit: u32) -> Result<JsValue, JsValue> {
+    let colors = parse_colors_5x5(&color_grid)?;
+    let solver = solver::Solver::new(colors);
+    let solutions = solver.solve_masks_limit(limit as usize);
+    let truncated = limit != 0 && (solutions.len() as u32) >= limit;
+    let res = SolutionCountResult {
+        count: solutions.len() as u32,
+        truncated,
+    };
+    serde_wasm_bindgen::to_value(&res).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// 在“已有部分勾选”的前提下统计解数量（最多枚举到 `limit` 个解）。
+#[wasm_bindgen]
+pub fn solution_count_with_checked(
+    checked_mask: u32,
+    color_grid: Vec<u8>,
+    limit: u32,
+) -> Result<JsValue, JsValue> {
+    let colors = parse_colors_5x5(&color_grid)?;
+    let solver = solver::Solver::new(colors);
+    let solutions = solver.solve_masks_limit_with_checked_mask(checked_mask, limit as usize);
+    let truncated = limit != 0 && (solutions.len() as u32) >= limit;
+    let res = SolutionCountResult {
+        count: solutions.len() as u32,
+        truncated,
+    };
+    serde_wasm_bindgen::to_value(&res).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(test)]
+mod solution_count_tests {
+    use super::*;
+
+    #[test]
+    fn solution_count_detects_unique_for_all_black() {
+        let grid = vec![Color::Black.to_u8(); crate::masks::CELL_COUNT];
+        let colors = parse_colors_5x5(&grid).expect("parse ok");
+        let solver = crate::solver::Solver::new(colors);
+
+        let solutions = solver.solve_masks_limit(2);
+        assert_eq!(solutions.len(), 1);
+    }
+
+    #[test]
+    fn solution_count_limit2_reports_multiple_when_possible() {
+        // 第一行全黑：起始即满足 Bingo，其余格子为白色（几乎无约束），因此必然存在大量解
+        let mut grid = vec![Color::White.to_u8(); crate::masks::CELL_COUNT];
+        for i in 0..crate::masks::GRID_SIZE {
+            grid[i] = Color::Black.to_u8();
+        }
+
+        let colors = parse_colors_5x5(&grid).expect("parse ok");
+        let solver = crate::solver::Solver::new(colors);
+
+        let solutions = solver.solve_masks_limit(2);
+        assert_eq!(solutions.len(), 2);
+    }
 }

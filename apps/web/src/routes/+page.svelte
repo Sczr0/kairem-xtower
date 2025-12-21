@@ -5,6 +5,7 @@
 	import RuleCard, { type Rule as UiRule } from '$lib/components/RuleCard.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import rules from '$lib/rules.json';
+	import { decodeLevel, encodeLevel } from '$lib/level-code.js';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
 	import {
 		loadEngine,
@@ -21,8 +22,9 @@
 	let engine: Engine | null = null;
 	let engineError = '';
 
-	let puzzleKind: 'daily' | 'seed' = 'daily';
+	let puzzleKind: 'daily' | 'seed' | 'custom' = 'daily';
 	let urlSeedError = '';
+	let urlLevelError = '';
 
 	let dateYmd = '';
 	let seed: bigint | null = null;
@@ -114,6 +116,7 @@
 	function buildSeedUrl(v: bigint): string {
 		if (!browser) return '';
 		const url = new URL(window.location.href);
+		url.searchParams.delete('level');
 		url.searchParams.set('seed', v.toString());
 		return url.toString();
 	}
@@ -121,8 +124,26 @@
 	function replaceUrlSeed(v: bigint | null) {
 		if (!browser) return;
 		const url = new URL(window.location.href);
+		url.searchParams.delete('level');
 		if (v === null) url.searchParams.delete('seed');
 		else url.searchParams.set('seed', v.toString());
+		window.history.replaceState({}, '', url.toString());
+	}
+
+	function buildLevelUrl(code: string): string {
+		if (!browser) return '';
+		const url = new URL(window.location.href);
+		url.searchParams.delete('seed');
+		url.searchParams.set('level', code);
+		return url.toString();
+	}
+
+	function replaceUrlLevel(code: string | null) {
+		if (!browser) return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete('seed');
+		if (code === null) url.searchParams.delete('level');
+		else url.searchParams.set('level', code);
 		window.history.replaceState({}, '', url.toString());
 	}
 
@@ -265,18 +286,41 @@
 		if (opts.updateUrl) replaceUrlSeed(seed);
 	}
 
+	function loadPuzzleByCustomGrid(flat: ColorId[], opts: { updateUrl?: boolean } = {}) {
+		seed = null;
+		grid2d = [];
+		grid = [...flat];
+		checkedMask = blackMaskFromGrid(grid);
+		hoveredRuleId = null;
+		activeCellIndex = null;
+		clearHint();
+		refreshValidate();
+		refreshDifficulty();
+		if (opts.updateUrl) {
+			try {
+				replaceUrlLevel(encodeLevel(grid));
+			} catch {
+				replaceUrlLevel(null);
+			}
+		}
+	}
+
 	async function newSeedPuzzle(newSeed: bigint, opts: { updateUrl?: boolean } = {}) {
 		if (!engine) return;
 		puzzleKind = 'seed';
 		urlSeedError = '';
+		urlLevelError = '';
 		dateYmd = '';
 		await loadPuzzleBySeed(newSeed, opts);
 	}
 
-	async function newDailyPuzzle(opts: { updateUrl?: boolean; keepUrlSeedError?: boolean } = {}) {
+	async function newDailyPuzzle(
+		opts: { updateUrl?: boolean; keepUrlSeedError?: boolean; keepUrlLevelError?: boolean } = {}
+	) {
 		if (!engine) return;
 		puzzleKind = 'daily';
 		if (!opts.keepUrlSeedError) urlSeedError = '';
+		if (!opts.keepUrlLevelError) urlLevelError = '';
 		dateYmd = shanghaiDateYmd();
 		const dailySeed = engine.date_to_seed_ymd(dateYmd);
 		await loadPuzzleBySeed(dailySeed);
@@ -289,9 +333,20 @@
 	}
 
 	async function sharePuzzle() {
-		if (!seed || !browser) return;
+		if (!browser) return;
 
-		const url = buildSeedUrl(seed);
+		let url = '';
+		if (puzzleKind === 'custom') {
+			try {
+				url = buildLevelUrl(encodeLevel(grid));
+			} catch (e) {
+				showToast(`关卡编码失败：${String(e)}`);
+				return;
+			}
+		} else {
+			if (!seed) return;
+			url = buildSeedUrl(seed);
+		}
 		shareUrlForManualCopy = url;
 		shareManualVisible = false;
 
@@ -324,7 +379,26 @@
 		try {
 			engine = await loadEngine();
 
-			const rawSeed = new URL(window.location.href).searchParams.get('seed');
+			const url = new URL(window.location.href);
+
+			const rawLevel = url.searchParams.get('level');
+			if (rawLevel !== null) {
+				try {
+					const decoded = decodeLevel(rawLevel);
+					puzzleKind = 'custom';
+					urlSeedError = '';
+					urlLevelError = '';
+					dateYmd = '';
+					loadPuzzleByCustomGrid(decoded.grid as ColorId[], { updateUrl: true });
+					return;
+				} catch {
+					urlLevelError = 'level 参数无效，已回退到今日题目';
+					await newDailyPuzzle({ updateUrl: true, keepUrlLevelError: true });
+					return;
+				}
+			}
+
+			const rawSeed = url.searchParams.get('seed');
 			if (rawSeed !== null) {
 				const parsed = parseSeed(rawSeed);
 				if (parsed === null) {
@@ -420,6 +494,9 @@
 
 				{#if urlSeedError}
 					<div class="hint-banner">{urlSeedError}</div>
+				{/if}
+				{#if urlLevelError}
+					<div class="hint-banner">{urlLevelError}</div>
 				{/if}
 
                 <!-- 棋盘容器 -->

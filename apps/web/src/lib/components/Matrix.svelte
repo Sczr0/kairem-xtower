@@ -10,6 +10,10 @@
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
 	export let onHover: (index: number | null) => void = () => {};
+	// 编辑模式：用于关卡编辑器（不影响玩法页默认行为）
+	export let mode: 'play' | 'edit' = 'play';
+	export let onPaint: (index: number) => void = () => {};
+	export let onAltPaint: (index: number) => void = () => {};
 	// 提示高亮：仅用于 UI 引导，不影响逻辑。
 	export let hintIndex: number | null = null;
 	export let hintAction: 'check' | 'uncheck' | null = null;
@@ -26,6 +30,17 @@
 	function handleMouseLeave() {
 		onHover(null);
 	}
+
+	function handleClick(i: number) {
+		if (mode === 'edit') onPaint(i);
+		else onToggle(i);
+	}
+
+	function handleContextMenu(event: MouseEvent, i: number) {
+		if (mode !== 'edit') return;
+		event.preventDefault();
+		onAltPaint(i);
+	}
 </script>
 
 <div class="matrix" role="grid" aria-label="5x5 矩阵">
@@ -33,11 +48,12 @@
 		<div class="cell-wrapper">
 			<button
 				type="button"
-				class="cell {checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {hintIndex === i ? 'hint' : ''} {hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
+				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
 				style="--cell-color: {colorToCss(grid[i])}"
-				aria-pressed={checkedFlags[i]}
-				disabled={blackFlags[i]}
-				on:click={() => onToggle(i)}
+				aria-pressed={mode === 'play' ? checkedFlags[i] : undefined}
+				disabled={mode === 'play' && blackFlags[i]}
+				on:click={() => handleClick(i)}
+				on:contextmenu={(e) => handleContextMenu(e, i)}
 				on:mouseenter={() => handleMouseEnter(i)}
 				on:mouseleave={handleMouseLeave}
 				on:focus={() => handleMouseEnter(i)}
@@ -47,7 +63,7 @@
 				{#if !cellOk[i]}
 					<div class="error-indicator" aria-hidden="true">!</div>
 				{/if}
-				{#if checkedFlags[i]}
+				{#if mode === 'play' && checkedFlags[i]}
 					<svg
 						class="mark"
 						viewBox="0 0 24 24"
