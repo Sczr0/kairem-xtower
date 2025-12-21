@@ -10,6 +10,10 @@
 					const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? false;
 					const theme = stored === 'dark' || stored === 'light' ? stored : prefersDark ? 'dark' : 'light';
 					document.documentElement.dataset.theme = theme;
+
+					// 色盲模式：默认 off，避免首屏闪烁后再“跳状态”
+					const cb = localStorage.getItem('a11y.colorBlind');
+					document.documentElement.dataset.colorblind = cb === 'on' ? 'on' : 'off';
 				} catch {
 					// 忽略：无痕/隐私模式可能禁用 localStorage
 				}

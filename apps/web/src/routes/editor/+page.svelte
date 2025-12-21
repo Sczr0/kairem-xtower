@@ -3,11 +3,13 @@
 <script lang="ts">
 	import Matrix from '$lib/components/Matrix.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import A11yToggle from '$lib/components/A11yToggle.svelte';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
 	import { decodeLevel, encodeLevel, levelToJson, normalizeLevelJson } from '$lib/level-code.js';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
+	import { colorBlindEnabled } from '$lib/a11y';
 	import {
 		loadEngine,
 		type DifficultyReport,
@@ -247,6 +249,7 @@
 		</div>
 		<div class="header-actions">
 			<a class="btn" href="/daily">日历</a>
+			<A11yToggle />
 			<ThemeToggle />
 		</div>
 	</header>
@@ -295,6 +298,7 @@
 						mode="edit"
 						grid={grid}
 						checkedMask={0}
+						colorBlindMode={$colorBlindEnabled}
 						cellOk={validate?.cell_ok ?? Array.from({ length: 25 }, () => true)}
 						onPaint={paint}
 						onAltPaint={altPaint}

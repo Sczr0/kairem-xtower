@@ -8,6 +8,8 @@
 	export let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	export let checkedMask = 0;
 	export let marks: number[] = Array.from({ length: 25 }, () => 0);
+	// 色盲模式：叠加字母/纹理提示（仅 UI，默认关闭）
+	export let colorBlindMode = false;
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
 	export let onMarkCycle: (index: number) => void = () => {};
@@ -24,6 +26,78 @@
 	// 这里用响应式语句显式建立依赖关系，保证勾选样式能即时更新。
 	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
+
+	const cellEls: (HTMLButtonElement | null)[] = Array.from({ length: 25 }, () => null);
+
+	function cellRef(node: HTMLButtonElement, i: number) {
+		cellEls[i] = node;
+		return {
+			destroy() {
+				if (cellEls[i] === node) cellEls[i] = null;
+			}
+		};
+	}
+
+	function isDisabled(i: number): boolean {
+		return mode === 'play' && blackFlags[i];
+	}
+
+	function focusCell(i: number) {
+		const el = cellEls[i];
+		if (!el) return;
+		el.focus();
+	}
+
+	function stepFocus(from: number, dx: number, dy: number) {
+		const x = from % 5;
+		const y = Math.floor(from / 5);
+		let nx = x + dx;
+		let ny = y + dy;
+		while (nx >= 0 && nx < 5 && ny >= 0 && ny < 5) {
+			const next = ny * 5 + nx;
+			if (!isDisabled(next)) {
+				focusCell(next);
+				return;
+			}
+			nx += dx;
+			ny += dy;
+		}
+	}
+
+	function colorBlindLabel(color: ColorId): string {
+		// 约定：与 rules.json 的颜色命名对应
+		switch (color) {
+			case Color.Red:
+				return 'R';
+			case Color.Blue:
+				return 'B';
+			case Color.Green:
+				return 'G';
+			case Color.Yellow:
+				return 'Y';
+			case Color.Purple:
+				return 'P';
+			case Color.Orange:
+				return 'O';
+			case Color.Cyan:
+				return 'C';
+			case Color.Black:
+				return 'K';
+			case Color.White:
+				return 'W';
+			default:
+				return '?';
+		}
+	}
+
+	function cellAriaLabel(i: number): string {
+		const row = Math.floor(i / 5) + 1;
+		const col = (i % 5) + 1;
+		const checked = checkedFlags[i] ? '已勾选' : '未勾选';
+		const mark = marks[i] === 1 ? '标记排除' : marks[i] === 2 ? '标记问号' : '无标记';
+		const color = colorBlindLabel(grid[i]);
+		return `第${row}行第${col}列，颜色 ${color}，${checked}，${mark}`;
+	}
 
 	let longPressTimer: ReturnType<typeof setTimeout> | null = null;
 	let longPressIndex: number | null = null;
@@ -95,6 +169,45 @@
 		if (event.pointerType !== 'touch') return;
 		clearLongPress();
 	}
+
+	function handleKeyDown(event: KeyboardEvent, i: number) {
+		if (event.defaultPrevented) return;
+		const key = event.key;
+
+		if (key === 'ArrowUp') {
+			event.preventDefault();
+			stepFocus(i, 0, -1);
+			return;
+		}
+		if (key === 'ArrowDown') {
+			event.preventDefault();
+			stepFocus(i, 0, 1);
+			return;
+		}
+		if (key === 'ArrowLeft') {
+			event.preventDefault();
+			stepFocus(i, -1, 0);
+			return;
+		}
+		if (key === 'ArrowRight') {
+			event.preventDefault();
+			stepFocus(i, 1, 0);
+			return;
+		}
+
+		// Space/Enter：在当前格执行“点击”语义
+		if (key === ' ' || key === 'Enter') {
+			event.preventDefault();
+			handleClick(i);
+			return;
+		}
+
+		// M：循环标记（键盘可达）
+		if (mode === 'play' && (key === 'm' || key === 'M')) {
+			event.preventDefault();
+			onMarkCycle(i);
+		}
+	}
 </script>
 
 <div class="matrix" role="grid" aria-label="5x5 矩阵">
@@ -105,12 +218,15 @@
 				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
 				style="--cell-color: {colorToCss(grid[i])}"
 				aria-pressed={mode === 'play' ? checkedFlags[i] : undefined}
+				aria-label={cellAriaLabel(i)}
 				disabled={mode === 'play' && blackFlags[i]}
+				use:cellRef={i}
 				on:click={() => handleClick(i)}
 				on:contextmenu={(e) => handleContextMenu(e, i)}
 				on:pointerdown={(e) => handlePointerDown(e, i)}
 				on:pointerup={(e) => handlePointerUp(e, i)}
 				on:pointercancel={handlePointerCancel}
+				on:keydown={(e) => handleKeyDown(e, i)}
 				on:mouseenter={() => handleMouseEnter(i)}
 				on:mouseleave={handleMouseLeave}
 				on:focus={() => handleMouseEnter(i)}
@@ -138,6 +254,9 @@
 					<div class="note note-exclude" aria-hidden="true">⊘</div>
 				{:else if mode === 'play' && marks[i] === 2}
 					<div class="note note-question" aria-hidden="true">?</div>
+				{/if}
+				{#if colorBlindMode}
+					<div class="cb-label" aria-hidden="true">{colorBlindLabel(grid[i])}</div>
 				{/if}
 			</button>
 		</div>
@@ -187,6 +306,11 @@
 			box-shadow 140ms ease,
 			transform 80ms ease;
 		touch-action: manipulation;
+	}
+
+	.cell:focus-visible {
+		outline: 3px solid color-mix(in srgb, var(--c-blue) 55%, transparent);
+		outline-offset: 2px;
 	}
 
 	.cell:hover:not(:disabled) {
@@ -304,6 +428,31 @@
 			top: 4px;
 			left: 6px;
 			font-size: 12px;
+			padding: 1px 5px;
+		}
+	}
+
+	.cb-label {
+		position: absolute;
+		bottom: 6px;
+		right: 8px;
+		font-size: 12px;
+		font-weight: 900;
+		letter-spacing: 0.02em;
+		padding: 2px 6px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--panel) 72%, transparent);
+		border: 1px solid var(--border);
+		color: var(--text);
+		z-index: 3;
+		pointer-events: none;
+	}
+
+	@media (max-width: 720px) {
+		.cb-label {
+			bottom: 4px;
+			right: 6px;
+			font-size: 11px;
 			padding: 1px 5px;
 		}
 	}

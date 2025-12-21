@@ -12,3 +12,10 @@
 /_app/immutable/assets/*.wasm
   Content-Type: application/wasm
   X-Content-Type-Options: nosniff
+
+/service-worker.js
+  Cache-Control: no-cache
+
+/site.webmanifest
+  Content-Type: application/manifest+json; charset=utf-8
+  Cache-Control: public, max-age=3600

@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import A11yToggle from '$lib/components/A11yToggle.svelte';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { listProgressEntries, type ProgressEntry } from '$lib/progress.js';
@@ -139,6 +140,7 @@
 		</div>
 		<div class="header-right">
 			<a class="btn" href="/editor">编辑器</a>
+			<A11yToggle />
 			<ThemeToggle />
 		</div>
 	</header>
@@ -469,4 +471,3 @@
 		white-space: nowrap;
 	}
 </style>
-
