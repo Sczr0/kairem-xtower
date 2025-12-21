@@ -547,14 +547,67 @@ impl Solver {
         }
 
         // 2) 传播推出的“必须不勾选”也属于强制，但对 UI 来说不如“勾哪一格”直观。
+        //
+        // 注意：当前 UI 仅记录“已勾选”(checked_mask)，没有“已确定不勾选”的单独状态。
+        // 因此如果目标格本来就未勾选，返回“必须不勾选”会变成无效操作，导致用户反复点提示却卡在同一句话。
+        // 这里仅返回对当前状态“可执行/可改变”的 uncheck：目标格必须是当前已勾选。
         for &cell in &self.rules.decision_order {
-            if state.is_unchecked_id(cell) {
+            if !state.is_unchecked_id(cell) {
+                continue;
+            }
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) == 0 {
+                continue;
+            }
+
+            return HintResult {
+                status: HintStatus::Forced,
+                message: format!(
+                    "根据当前信息可推出：({},{}) 必须不勾选。",
+                    (cell / self.rules.size) + 1,
+                    (cell % self.rules.size) + 1
+                ),
+                mv: Some(HintMove {
+                    cell,
+                    action: HintAction::Uncheck,
+                    forced: true,
+                }),
+            };
+        }
+
+        // 3) 反证（传播矛盾）推出的强制一步：依然是“安全提示”。
+        let mut budget = 10_000u32;
+        if let Some((cell, forced_checked, _obs, _scarcity)) =
+            self.find_forced_by_contradiction(&state, &mut budget)
+        {
+            let bit = 1u32 << cell;
+
+            // 同上：只返回“会改变当前状态”的一步，避免提示卡死。
+            if forced_checked {
+                if (checked_mask & bit) == 0 {
+                    return HintResult {
+                        status: HintStatus::Forced,
+                        message: format!(
+                            "通过反证可推出：({},{}) 必须{}。",
+                            (cell / self.rules.size) + 1,
+                            (cell % self.rules.size) + 1,
+                            "勾选"
+                        ),
+                        mv: Some(HintMove {
+                            cell,
+                            action: HintAction::Check,
+                            forced: true,
+                        }),
+                    };
+                }
+            } else if (checked_mask & bit) != 0 {
                 return HintResult {
                     status: HintStatus::Forced,
                     message: format!(
-                        "根据当前信息可推出：({},{}) 必须不勾选。",
+                        "通过反证可推出：({},{}) 必须{}。",
                         (cell / self.rules.size) + 1,
-                        (cell % self.rules.size) + 1
+                        (cell % self.rules.size) + 1,
+                        "不勾选"
                     ),
                     mv: Some(HintMove {
                         cell,
@@ -563,31 +616,6 @@ impl Solver {
                     }),
                 };
             }
-        }
-
-        // 3) 反证（传播矛盾）推出的强制一步：依然是“安全提示”。
-        let mut budget = 10_000u32;
-        if let Some((cell, forced_checked, _obs, _scarcity)) =
-            self.find_forced_by_contradiction(&state, &mut budget)
-        {
-            return HintResult {
-                status: HintStatus::Forced,
-                message: format!(
-                    "通过反证可推出：({},{}) 必须{}。",
-                    (cell / self.rules.size) + 1,
-                    (cell % self.rules.size) + 1,
-                    if forced_checked { "勾选" } else { "不勾选" }
-                ),
-                mv: Some(HintMove {
-                    cell,
-                    action: if forced_checked {
-                        HintAction::Check
-                    } else {
-                        HintAction::Uncheck
-                    },
-                    forced: true,
-                }),
-            };
         }
 
         // 4) 没有强制结论：从一个可行解中抽取一步（建议）。
@@ -1732,5 +1760,38 @@ mod tests {
         let solver = Solver::new(colors);
         let hint = solver.hint_next(0u32);
         assert!(!matches!(hint.status, HintStatus::NoSolution));
+    }
+
+    #[test]
+    fn hint_uncheck_move_is_actionable() {
+        // 该测试针对“提示要求 uncheck 但目标格并未被勾选，导致提示卡死”的问题。
+        // 约定：如果返回 move.action == Uncheck，则该格必须在 checked_mask 中为 1（用户当前确实勾选了它）。
+        let grid = crate::generate::generate_puzzle(123).expect("generate ok");
+        let flat: Vec<u8> = grid.into_iter().flatten().collect();
+
+        let mut colors = [Color::White; CELL_COUNT];
+        for (i, v) in flat.into_iter().enumerate() {
+            colors[i] = Color::from_u8(v).expect("valid color");
+        }
+
+        let mut black_mask = 0u32;
+        for i in 0..CELL_COUNT {
+            if colors[i] == Color::Black {
+                black_mask |= 1u32 << i;
+            }
+        }
+
+        let solver = Solver::new(colors);
+        let hint = solver.hint_next(black_mask);
+        if let Some(mv) = hint.mv {
+            if matches!(mv.action, HintAction::Uncheck) {
+                assert_ne!(
+                    black_mask & (1u32 << mv.cell),
+                    0,
+                    "hint asked to uncheck an unchecked cell: cell={}",
+                    mv.cell
+                );
+            }
+        }
     }
 }
