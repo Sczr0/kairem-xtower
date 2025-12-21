@@ -6,6 +6,23 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import rules from '$lib/rules.json';
 	import { decodeLevel, encodeLevel } from '$lib/level-code.js';
+	import {
+		clearAllProgress,
+		createHistory,
+		deleteProgressEntry,
+		HISTORY_LIMIT,
+		historyPush,
+		historyRedo,
+		historyUndo,
+		loadProgressEntry,
+		listProgressEntries,
+		makePuzzleKey,
+		normalizeHistory,
+		normalizeMaskU32,
+		upsertProgressEntry,
+		type HistoryState,
+		type ProgressEntry
+	} from '$lib/progress.js';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
 	import {
 		loadEngine,
@@ -36,6 +53,13 @@
 	let grid2d: number[][] = [];
 	let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	let checkedMask = 0;
+	let levelCode: string | null = null;
+	let history: HistoryState = createHistory(0);
+	let moveCount = 0;
+	let hintCount = 0;
+	let solvedAt: string | null = null;
+	let progressEntries: ProgressEntry[] = [];
+	let keyboardBound = false;
 	let validate: ValidateResult | null = null;
 	let difficulty: DifficultyReport | null = null;
 	let hoveredRuleId: string | null = null;
@@ -80,6 +104,10 @@
 	}
 
 	$: hoveredRule = hoveredRuleId ? allRules.find((r) => r.id === hoveredRuleId) ?? null : null;
+	$: isSolved = !!(validate?.is_valid && validate?.is_bingo);
+	$: canUndo = history.undo.length > 0;
+	$: canRedo = history.redo.length > 0;
+	$: currentProgressKey = safeCurrentPuzzleKey();
 
 	function shanghaiDateYmd(now = new Date()): string {
 		const fmt = new Intl.DateTimeFormat('zh-CN', {
@@ -111,6 +139,21 @@
 		const s = v.toString();
 		if (s.length <= 12) return s;
 		return `${s.slice(0, 6)}…${s.slice(-4)}`;
+	}
+
+	function shortLevelCode(code: string): string {
+		const s = String(code ?? '').trim();
+		if (!s) return '--';
+		if (s.length <= 18) return s;
+		return `${s.slice(0, 10)}…${s.slice(-6)}`;
+	}
+
+	function safeLevelCodeForDisplay(): string {
+		try {
+			return levelCode ?? encodeLevel(grid);
+		} catch {
+			return '--';
+		}
 	}
 
 	function buildSeedUrl(v: bigint): string {
@@ -188,6 +231,103 @@
 		return m >>> 0;
 	}
 
+	function safeCurrentPuzzleKey(): string | null {
+		try {
+			if (puzzleKind === 'daily') {
+				if (!dateYmd) return null;
+				return makePuzzleKey('daily', { dateYmd });
+			}
+			if (puzzleKind === 'seed') {
+				if (!seed) return null;
+				return makePuzzleKey('seed', { seed: seed.toString() });
+			}
+			// custom
+			let code = levelCode;
+			if (!code) {
+				code = encodeLevel(grid);
+				levelCode = code;
+			}
+			return makePuzzleKey('custom', { levelCode: code });
+		} catch {
+			return null;
+		}
+	}
+
+	function refreshProgressEntries() {
+		progressEntries = listProgressEntries();
+	}
+
+	function applyBlackMaskToHistory(h: HistoryState, blackMask: number): HistoryState {
+		const apply = (m: number) => normalizeMaskU32((m | blackMask) >>> 0);
+		return normalizeHistory(
+			{
+				undo: (h.undo ?? []).map(apply),
+				redo: (h.redo ?? []).map(apply),
+				present: apply(h.present)
+			},
+			HISTORY_LIMIT
+		);
+	}
+
+	function persistProgress() {
+		const key = safeCurrentPuzzleKey();
+		if (!key) return;
+
+		const nowIso = new Date().toISOString();
+		if (isSolved && !solvedAt) solvedAt = nowIso;
+
+		const kind: ProgressEntry['kind'] =
+			puzzleKind === 'custom' ? 'custom' : puzzleKind === 'daily' ? 'daily' : 'seed';
+
+		const entry: ProgressEntry = {
+			key,
+			kind,
+			dateYmd: kind === 'daily' ? dateYmd : undefined,
+			seed: seed ? seed.toString() : undefined,
+			levelCode: kind === 'custom' ? (levelCode ?? encodeLevel(grid)) : undefined,
+			checkedMask: checkedMask >>> 0,
+			undo: history.undo,
+			redo: history.redo,
+			moveCount,
+			hintCount,
+			solvedAt: solvedAt ?? undefined
+		};
+
+		upsertProgressEntry(entry);
+		refreshProgressEntries();
+	}
+
+	function restoreProgressIfAny() {
+		const key = safeCurrentPuzzleKey();
+		if (!key) return;
+
+		const saved = loadProgressEntry(key);
+		if (!saved) return;
+
+		if (saved.kind === 'custom' && typeof saved.levelCode === 'string') {
+			levelCode = saved.levelCode;
+		}
+
+		const blackMask = blackMaskFromGrid(grid);
+		const restored = applyBlackMaskToHistory(
+			normalizeHistory(
+				{
+					undo: saved.undo ?? [],
+					redo: saved.redo ?? [],
+					present: typeof saved.checkedMask === 'number' ? saved.checkedMask : blackMask
+				},
+				HISTORY_LIMIT
+			),
+			blackMask
+		);
+
+		history = restored;
+		checkedMask = restored.present;
+		moveCount = typeof saved.moveCount === 'number' ? saved.moveCount : 0;
+		hintCount = typeof saved.hintCount === 'number' ? saved.hintCount : 0;
+		solvedAt = typeof saved.solvedAt === 'string' ? saved.solvedAt : null;
+	}
+
 	function refreshValidate() {
 		if (!engine) return;
 		validate = engine.validate_state(checkedMask >>> 0, new Uint8Array(grid));
@@ -210,15 +350,52 @@
 
 	function toggle(i: number) {
 		if (grid[i] === Color.Black) return;
-		checkedMask = (checkedMask ^ (1 << i)) >>> 0;
+		const next = (checkedMask ^ (1 << i)) >>> 0;
+		history = historyPush({ undo: history.undo, redo: history.redo, present: checkedMask }, next);
+		checkedMask = history.present;
+		moveCount += 1;
 		focusRuleByIndex(i);
 		refreshValidate();
 		clearHint();
+		persistProgress();
 	}
 
 	function handleHover(index: number | null) {
 		if (index === null) return;
 		focusRuleByIndex(index);
+	}
+
+	function undo() {
+		if (!canUndo) return;
+		history = historyUndo({ undo: history.undo, redo: history.redo, present: checkedMask });
+		checkedMask = history.present;
+		refreshValidate();
+		clearHint();
+		persistProgress();
+	}
+
+	function redo() {
+		if (!canRedo) return;
+		history = historyRedo({ undo: history.undo, redo: history.redo, present: checkedMask });
+		checkedMask = history.present;
+		refreshValidate();
+		clearHint();
+		persistProgress();
+	}
+
+	function handleGlobalKeyDown(event: KeyboardEvent) {
+		if (event.defaultPrevented) return;
+		const target = event.target as HTMLElement | null;
+		const tag = target?.tagName?.toLowerCase() ?? '';
+		if (tag === 'input' || tag === 'textarea' || (target as any)?.isContentEditable) return;
+
+		const mod = event.ctrlKey || event.metaKey;
+		if (!mod) return;
+		if (event.key.toLowerCase() !== 'z') return;
+
+		event.preventDefault();
+		if (event.shiftKey) redo();
+		else undo();
 	}
 
 	async function requestHint() {
@@ -232,6 +409,8 @@
 		try {
 			const res = engine.hint_next(checkedMask >>> 0, new Uint8Array(grid));
 			hint = res;
+			hintCount += 1;
+			persistProgress();
 			const mv = res.move ?? null;
 			if (mv) {
 				hintIndex = mv.cell;
@@ -275,34 +454,52 @@
 	async function loadPuzzleBySeed(newSeed: bigint, opts: { updateUrl?: boolean } = {}) {
 		if (!engine) return;
 		seed = newSeed;
+		levelCode = null;
 		grid2d = engine.generate_puzzle(seed);
 		grid = flattenGrid2d(grid2d);
 		checkedMask = blackMaskFromGrid(grid);
+		history = createHistory(checkedMask);
+		moveCount = 0;
+		hintCount = 0;
+		solvedAt = null;
+		validate = null;
 		hoveredRuleId = null;
 		activeCellIndex = null;
 		clearHint();
+		restoreProgressIfAny();
 		refreshValidate();
 		refreshDifficulty();
 		if (opts.updateUrl) replaceUrlSeed(seed);
+		persistProgress();
 	}
 
-	function loadPuzzleByCustomGrid(flat: ColorId[], opts: { updateUrl?: boolean } = {}) {
+	function loadPuzzleByCustomGrid(flat: ColorId[], opts: { updateUrl?: boolean; levelCode?: string } = {}) {
 		seed = null;
 		grid2d = [];
 		grid = [...flat];
 		checkedMask = blackMaskFromGrid(grid);
+		levelCode = opts.levelCode ?? null;
+		history = createHistory(checkedMask);
+		moveCount = 0;
+		hintCount = 0;
+		solvedAt = null;
+		validate = null;
 		hoveredRuleId = null;
 		activeCellIndex = null;
 		clearHint();
+		restoreProgressIfAny();
 		refreshValidate();
 		refreshDifficulty();
 		if (opts.updateUrl) {
 			try {
-				replaceUrlLevel(encodeLevel(grid));
+				const code = levelCode ?? encodeLevel(grid);
+				levelCode = code;
+				replaceUrlLevel(code);
 			} catch {
 				replaceUrlLevel(null);
 			}
 		}
+		persistProgress();
 	}
 
 	async function newSeedPuzzle(newSeed: bigint, opts: { updateUrl?: boolean } = {}) {
@@ -332,13 +529,110 @@
 		await newSeedPuzzle(randomSeedU64(), { updateUrl: true });
 	}
 
+	async function loadDailyPuzzleByDate(targetDateYmd: string, opts: { updateUrl?: boolean } = {}) {
+		if (!engine) return;
+		puzzleKind = 'daily';
+		urlSeedError = '';
+		urlLevelError = '';
+		dateYmd = targetDateYmd;
+		const dailySeed = engine.date_to_seed_ymd(dateYmd);
+		await loadPuzzleBySeed(dailySeed);
+		if (opts.updateUrl) replaceUrlSeed(null);
+	}
+
+	async function openProgressEntry(entry: ProgressEntry) {
+		try {
+			if (!engine) return;
+			if (entry.kind === 'daily' && entry.dateYmd) {
+				await loadDailyPuzzleByDate(entry.dateYmd, { updateUrl: true });
+				return;
+			}
+			if (entry.kind === 'seed' && entry.seed) {
+				await newSeedPuzzle(BigInt(entry.seed), { updateUrl: true });
+				return;
+			}
+			if (entry.kind === 'custom' && entry.levelCode) {
+				const decoded = decodeLevel(entry.levelCode);
+				puzzleKind = 'custom';
+				urlSeedError = '';
+				urlLevelError = '';
+				dateYmd = '';
+				loadPuzzleByCustomGrid(decoded.grid as ColorId[], {
+					updateUrl: true,
+					levelCode: entry.levelCode
+				});
+				return;
+			}
+			showToast('存档信息不完整，无法打开');
+		} catch (e) {
+			showToast(`打开存档失败：${String(e)}`);
+		}
+	}
+
+	function removeProgressEntry(key: string) {
+		deleteProgressEntry(key);
+		refreshProgressEntries();
+		if (currentProgressKey === key) {
+			showToast('已删除当前关卡存档');
+		}
+	}
+
+	function clearAllProgressWithConfirm() {
+		if (!browser) return;
+		if (!confirm('确定清空所有本地存档/历史吗？')) return;
+		clearAllProgress();
+		refreshProgressEntries();
+		showToast('已清空');
+	}
+
+	function resetCurrentProgressWithConfirm() {
+		if (!browser) return;
+		const key = currentProgressKey;
+		if (!key) return;
+		if (!confirm('确定重置当前关卡进度吗？')) return;
+
+		deleteProgressEntry(key);
+		const blackMask = blackMaskFromGrid(grid);
+		history = createHistory(blackMask);
+		checkedMask = blackMask;
+		moveCount = 0;
+		hintCount = 0;
+		solvedAt = null;
+		refreshValidate();
+		clearHint();
+		persistProgress();
+		showToast('已重置');
+	}
+
+	function progressTitle(entry: ProgressEntry): string {
+		if (entry.kind === 'daily') return `每日 ${entry.dateYmd ?? ''}`.trim();
+		if (entry.kind === 'seed') return `seed ${entry.seed ?? ''}`.trim();
+		return `自定义 ${shortLevelCode(entry.levelCode ?? '')}`.trim();
+	}
+
+	function progressBadge(entry: ProgressEntry): string {
+		if (entry.solvedAt) return '已通关';
+		return '进行中';
+	}
+
+	function formatTimestamp(ts?: string): string {
+		if (!ts) return '';
+		try {
+			return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+		} catch {
+			return '';
+		}
+	}
+
 	async function sharePuzzle() {
 		if (!browser) return;
 
 		let url = '';
 		if (puzzleKind === 'custom') {
 			try {
-				url = buildLevelUrl(encodeLevel(grid));
+				const code = levelCode ?? encodeLevel(grid);
+				levelCode = code;
+				url = buildLevelUrl(code);
 			} catch (e) {
 				showToast(`关卡编码失败：${String(e)}`);
 				return;
@@ -378,6 +672,11 @@
 	onMount(async () => {
 		try {
 			engine = await loadEngine();
+			refreshProgressEntries();
+			if (!keyboardBound) {
+				window.addEventListener('keydown', handleGlobalKeyDown);
+				keyboardBound = true;
+			}
 
 			const url = new URL(window.location.href);
 
@@ -389,7 +688,7 @@
 					urlSeedError = '';
 					urlLevelError = '';
 					dateYmd = '';
-					loadPuzzleByCustomGrid(decoded.grid as ColorId[], { updateUrl: true });
+					loadPuzzleByCustomGrid(decoded.grid as ColorId[], { updateUrl: true, levelCode: rawLevel });
 					return;
 				} catch {
 					urlLevelError = 'level 参数无效，已回退到今日题目';
@@ -451,10 +750,19 @@
                 <!-- 工具栏：整合信息与操作 -->
 				<div class="toolbar">
 					<div class="game-info">
-						<span class="info-label">{puzzleKind === 'daily' ? '今日题目' : '随机种子'}</span>
+						<span class="info-label">
+							{puzzleKind === 'daily' ? '今日题目' : puzzleKind === 'custom' ? '自定义关卡' : '随机种子'}
+						</span>
 						<span class="info-value font-mono">
-                            {puzzleKind === 'daily' ? (dateYmd || '—') : (seed ? shortSeed(seed) : '—')}
-                        </span>
+							{puzzleKind === 'daily'
+								? dateYmd || '--'
+								: puzzleKind === 'custom'
+									? shortLevelCode(safeLevelCodeForDisplay())
+									: seed
+										? shortSeed(seed)
+										: '--'}
+						</span>
+						<span class="difficulty-chip" title="步数 / 提示次数">{moveCount} / {hintCount}</span>
 						{#if difficulty}
 							<span
 								class="difficulty-chip"
@@ -468,9 +776,16 @@
 					</div>
 
 					<div class="game-actions">
-						<button class="btn btn-primary" on:click={sharePuzzle} disabled={!seed} title="分享题目">
+						<button
+							class="btn btn-primary"
+							on:click={sharePuzzle}
+							disabled={puzzleKind === 'custom' ? false : !seed}
+							title="分享题目"
+						>
 							分享
 						</button>
+						<button class="btn" on:click={undo} disabled={!canUndo} title="撤销（Ctrl/Cmd+Z）">撤销</button>
+						<button class="btn" on:click={redo} disabled={!canRedo} title="重做（Ctrl/Cmd+Shift+Z）">重做</button>
 						<button class="btn" on:click={newRandomPuzzle} disabled={!engine}>
 							随机
 						</button>
@@ -553,6 +868,59 @@
                 </div>
 
 				<!-- 1.5 提示：优先给出“安全一步”，卡住时再用“建议一步” -->
+				<!-- 1.2 存档/历史 + 撤销/重做 -->
+				<div class="sidebar-card progress-panel">
+					<div class="panel-header">
+						<h2 class="panel-title">存档</h2>
+						<p class="panel-hint">自动保存当前关卡，支持撤销/重做与历史恢复。</p>
+					</div>
+
+					<div class="progress-current">
+						<div class="progress-row">
+							<div class="progress-title">当前</div>
+							<span class="progress-chip {isSolved ? 'safe' : ''}">{isSolved ? '已通关' : '进行中'}</span>
+						</div>
+						{#if solvedAt}
+							<div class="progress-subtext">通关时间：{formatTimestamp(solvedAt)}</div>
+						{/if}
+						<div class="progress-actions">
+							<button class="btn" on:click={undo} disabled={!canUndo} title="撤销（Ctrl/Cmd+Z）">撤销</button>
+							<button class="btn" on:click={redo} disabled={!canRedo} title="重做（Ctrl/Cmd+Shift+Z）">重做</button>
+							<button class="btn btn-ghost" on:click={resetCurrentProgressWithConfirm} disabled={!currentProgressKey}>
+								重置
+							</button>
+						</div>
+					</div>
+
+					<div class="progress-list">
+						{#if progressEntries.length === 0}
+							<div class="empty-placeholder">暂无存档</div>
+						{:else}
+							{#each progressEntries as e (e.key)}
+								<div class="progress-item {e.key === currentProgressKey ? 'active' : ''}">
+									<div class="progress-main">
+										<div class="progress-title">{progressTitle(e)}</div>
+										<div class="progress-sub">
+											<span class="progress-chip">{progressBadge(e)}</span>
+											<span class="progress-subtext">{formatTimestamp(e.updatedAt)}</span>
+										</div>
+									</div>
+									<div class="progress-buttons">
+										<button class="btn" on:click={() => openProgressEntry(e)} disabled={!engine}>打开</button>
+										<button class="btn btn-ghost" on:click={() => removeProgressEntry(e.key)}>删除</button>
+									</div>
+								</div>
+							{/each}
+						{/if}
+					</div>
+
+					<div class="progress-footer">
+						<button class="btn btn-ghost" on:click={clearAllProgressWithConfirm} disabled={progressEntries.length === 0}>
+							清空全部
+						</button>
+					</div>
+				</div>
+
 				<div class="sidebar-card hint-section">
 					<div class="panel-header hint-header">
 						<h2 class="panel-title">提示</h2>
@@ -894,6 +1262,98 @@
         color: var(--muted);
         line-height: 1.55;
     }
+
+	.progress-current {
+		padding: 10px 12px;
+		background: var(--bg-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+	}
+
+	.progress-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.progress-title {
+		font-weight: 900;
+		color: var(--text);
+		font-size: 0.92rem;
+	}
+
+	.progress-sub {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 6px;
+	}
+
+	.progress-subtext {
+		color: var(--muted);
+		font-size: 0.82rem;
+	}
+
+	.progress-chip {
+		font-size: 0.72rem;
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-weight: 850;
+		letter-spacing: 0.02em;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		color: var(--muted);
+		white-space: nowrap;
+	}
+
+	.progress-chip.safe {
+		background: color-mix(in srgb, var(--success) 12%, var(--panel));
+		color: color-mix(in srgb, var(--success) 70%, var(--text));
+		border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+	}
+
+	.progress-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 10px;
+	}
+
+	.progress-list {
+		margin-top: 12px;
+		display: grid;
+		gap: 10px;
+	}
+
+	.progress-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 10px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
+	}
+
+	.progress-item.active {
+		border-color: var(--border-2);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-blue) 18%, transparent);
+	}
+
+	.progress-buttons {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		justify-content: flex-end;
+	}
+
+	.progress-footer {
+		margin-top: 10px;
+		display: flex;
+		justify-content: flex-end;
+	}
 
 	.hint-header {
 		display: grid;
