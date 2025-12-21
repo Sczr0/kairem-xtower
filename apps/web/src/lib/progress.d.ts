@@ -24,6 +24,7 @@ export type ProgressEntry = {
 	seed?: string;
 	levelCode?: string;
 	checkedMask: number;
+	marks?: number[];
 	undo: number[];
 	redo: number[];
 	moveCount?: number;
@@ -38,4 +39,3 @@ export function listProgressEntries(): ProgressEntry[];
 export function upsertProgressEntry(entry: ProgressEntry): void;
 export function deleteProgressEntry(key: string): void;
 export function clearAllProgress(): void;
-

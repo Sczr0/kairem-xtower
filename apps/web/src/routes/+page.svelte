@@ -23,6 +23,7 @@
 		type HistoryState,
 		type ProgressEntry
 	} from '$lib/progress.js';
+	import { createMarks, cycleMarkValue, normalizeMarks } from '$lib/marks.js';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
 	import {
 		loadEngine,
@@ -53,6 +54,7 @@
 	let grid2d: number[][] = [];
 	let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	let checkedMask = 0;
+	let marks: number[] = createMarks();
 	let levelCode: string | null = null;
 	let history: HistoryState = createHistory(0);
 	let moveCount = 0;
@@ -69,6 +71,7 @@
 	let hintIndex: number | null = null;
 	let hintAction: 'check' | 'uncheck' | null = null;
 	let hintLoading = false;
+	let hintExplain: string | null = null;
 
 	type Rule = UiRule;
 	const allRules = (rules.rules ?? []) as Rule[];
@@ -107,6 +110,8 @@
 	$: isSolved = !!(validate?.is_valid && validate?.is_bingo);
 	$: canUndo = history.undo.length > 0;
 	$: canRedo = history.redo.length > 0;
+	$: hasMarks = marks.some((v) => v !== 0);
+	$: hintExplain = buildHintExplain(hint);
 	$: currentProgressKey = safeCurrentPuzzleKey();
 
 	function shanghaiDateYmd(now = new Date()): string {
@@ -286,6 +291,7 @@
 			seed: seed ? seed.toString() : undefined,
 			levelCode: kind === 'custom' ? (levelCode ?? encodeLevel(grid)) : undefined,
 			checkedMask: checkedMask >>> 0,
+			marks,
 			undo: history.undo,
 			redo: history.redo,
 			moveCount,
@@ -323,6 +329,7 @@
 
 		history = restored;
 		checkedMask = restored.present;
+		marks = normalizeMarks(saved.marks);
 		moveCount = typeof saved.moveCount === 'number' ? saved.moveCount : 0;
 		hintCount = typeof saved.hintCount === 'number' ? saved.hintCount : 0;
 		solvedAt = typeof saved.solvedAt === 'string' ? saved.solvedAt : null;
@@ -348,6 +355,31 @@
 		activeCellIndex = i;
 	}
 
+	function buildHintExplain(h: HintResult | null): string | null {
+		if (!h) return null;
+
+		if (h.status === 'no_solution') {
+			return '当前状态已无解：建议先撤销最近几步，或重置进度后再尝试。';
+		}
+
+		const mv = h.move ?? null;
+		if (!mv) return null;
+
+		const ruleId = colorRuleMap[grid[mv.cell]] ?? null;
+		const rule = ruleId ? allRules.find((r) => r.id === ruleId) ?? null : null;
+
+		const related =
+			rule && ruleId
+				? `相关规则：${rule.name}（由颜色决定）。${rule.description}`
+				: '相关规则：未知（未能从颜色映射到规则）。';
+
+		const safety = mv.forced
+			? '解释：这是安全一步（引擎证明另一种选择会导致矛盾/无解）。'
+			: '解释：这是建议方向（不一定唯一，但通常能推进推理）。';
+
+		return `${related}\n${safety}`;
+	}
+
 	function toggle(i: number) {
 		if (grid[i] === Color.Black) return;
 		const next = (checkedMask ^ (1 << i)) >>> 0;
@@ -357,6 +389,20 @@
 		focusRuleByIndex(i);
 		refreshValidate();
 		clearHint();
+		persistProgress();
+	}
+
+	function cycleMark(i: number) {
+		if (grid[i] === Color.Black) return;
+		const next = [...marks];
+		next[i] = cycleMarkValue(next[i]);
+		marks = next;
+		focusRuleByIndex(i);
+		persistProgress();
+	}
+
+	function clearMarks() {
+		marks = createMarks();
 		persistProgress();
 	}
 
@@ -458,6 +504,7 @@
 		grid2d = engine.generate_puzzle(seed);
 		grid = flattenGrid2d(grid2d);
 		checkedMask = blackMaskFromGrid(grid);
+		marks = createMarks();
 		history = createHistory(checkedMask);
 		moveCount = 0;
 		hintCount = 0;
@@ -478,6 +525,7 @@
 		grid2d = [];
 		grid = [...flat];
 		checkedMask = blackMaskFromGrid(grid);
+		marks = createMarks();
 		levelCode = opts.levelCode ?? null;
 		history = createHistory(checkedMask);
 		moveCount = 0;
@@ -595,6 +643,7 @@
 		const blackMask = blackMaskFromGrid(grid);
 		history = createHistory(blackMask);
 		checkedMask = blackMask;
+		marks = createMarks();
 		moveCount = 0;
 		hintCount = 0;
 		solvedAt = null;
@@ -819,10 +868,12 @@
 					<Matrix
 						grid={grid}
 						checkedMask={checkedMask}
+						marks={marks}
 						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
 						hintIndex={hintIndex}
 						hintAction={hintAction}
 						onToggle={toggle}
+						onMarkCycle={cycleMark}
 						onHover={handleHover}
 					/>
 				</div>
@@ -938,6 +989,9 @@
 									清除
 								</button>
 							{/if}
+							<button class="btn btn-ghost" on:click={clearMarks} disabled={!hasMarks} title="清除标记（右键/长按循环）">
+								清标记
+							</button>
 						</div>
 						{#if !hint}
 							<p class="panel-hint">优先给安全一步；若无强制结论，会给一个建议方向。</p>
@@ -947,6 +1001,9 @@
 					{#if hint}
 						<div class="hint-body">
 							<div class="hint-message">{hint.message}</div>
+							{#if hintExplain}
+								<div class="hint-explain">{hintExplain}</div>
+							{/if}
 							{#if hint.move}
 								<div class="hint-meta">
 									<span class="hint-badge {hint.move.forced ? 'safe' : 'suggest'}">
@@ -1380,6 +1437,14 @@
 		font-size: 0.9rem;
 		color: var(--text);
 		line-height: 1.5;
+	}
+
+	.hint-explain {
+		margin-top: 8px;
+		font-size: 0.82rem;
+		color: var(--muted);
+		line-height: 1.5;
+		white-space: pre-line;
 	}
 
 	.hint-meta {

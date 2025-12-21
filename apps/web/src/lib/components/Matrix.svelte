@@ -7,8 +7,10 @@
 
 	export let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
 	export let checkedMask = 0;
+	export let marks: number[] = Array.from({ length: 25 }, () => 0);
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
+	export let onMarkCycle: (index: number) => void = () => {};
 	export let onHover: (index: number | null) => void = () => {};
 	// 编辑模式：用于关卡编辑器（不影响玩法页默认行为）
 	export let mode: 'play' | 'edit' = 'play';
@@ -23,6 +25,18 @@
 	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
 
+	let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+	let longPressIndex: number | null = null;
+	let longPressTriggered = false;
+	let suppressContextMenuUntil = 0;
+
+	function clearLongPress() {
+		if (longPressTimer) clearTimeout(longPressTimer);
+		longPressTimer = null;
+		longPressIndex = null;
+		longPressTriggered = false;
+	}
+
 	function handleMouseEnter(i: number) {
 		onHover(i);
 	}
@@ -33,13 +47,53 @@
 
 	function handleClick(i: number) {
 		if (mode === 'edit') onPaint(i);
-		else onToggle(i);
+		else {
+			if (longPressTriggered && longPressIndex === i) {
+				clearLongPress();
+				return;
+			}
+			onToggle(i);
+		}
 	}
 
 	function handleContextMenu(event: MouseEvent, i: number) {
-		if (mode !== 'edit') return;
 		event.preventDefault();
-		onAltPaint(i);
+		if (mode === 'edit') onAltPaint(i);
+		else {
+			// iOS/Safari çš„é•¿æŒ‰å¯èƒ½ä¼šä¿®å¤æ€§åœ°è§¦å‘ contextmenuï¼Œé¿å…é•¿æŒ‰å¯¼è‡´å¾ªçŽ¯ä¸¤æ¬¡ã€?
+			if (Date.now() < suppressContextMenuUntil) return;
+			onMarkCycle(i);
+		}
+	}
+
+	function handlePointerDown(event: PointerEvent, i: number) {
+		if (mode !== 'play') return;
+		if (event.pointerType !== 'touch') return;
+		if (blackFlags[i]) return;
+
+		if (longPressTimer) clearTimeout(longPressTimer);
+		longPressIndex = i;
+		longPressTriggered = false;
+		longPressTimer = setTimeout(() => {
+			longPressTriggered = true;
+			suppressContextMenuUntil = Date.now() + 1200;
+			onMarkCycle(i);
+		}, 420);
+	}
+
+	function handlePointerUp(event: PointerEvent, i: number) {
+		if (mode !== 'play') return;
+		if (event.pointerType !== 'touch') return;
+		if (longPressIndex !== i) return;
+
+		if (longPressTimer) clearTimeout(longPressTimer);
+		longPressTimer = null;
+	}
+
+	function handlePointerCancel(event: PointerEvent) {
+		if (mode !== 'play') return;
+		if (event.pointerType !== 'touch') return;
+		clearLongPress();
 	}
 </script>
 
@@ -54,6 +108,9 @@
 				disabled={mode === 'play' && blackFlags[i]}
 				on:click={() => handleClick(i)}
 				on:contextmenu={(e) => handleContextMenu(e, i)}
+				on:pointerdown={(e) => handlePointerDown(e, i)}
+				on:pointerup={(e) => handlePointerUp(e, i)}
+				on:pointercancel={handlePointerCancel}
 				on:mouseenter={() => handleMouseEnter(i)}
 				on:mouseleave={handleMouseLeave}
 				on:focus={() => handleMouseEnter(i)}
@@ -76,6 +133,11 @@
 					>
 						<path d="M18 6L6 18M6 6l12 12" />
 					</svg>
+				{/if}
+				{#if mode === 'play' && marks[i] === 1}
+					<div class="note note-exclude" aria-hidden="true">⊘</div>
+				{:else if mode === 'play' && marks[i] === 2}
+					<div class="note note-question" aria-hidden="true">?</div>
 				{/if}
 			</button>
 		</div>
@@ -124,6 +186,7 @@
 			border-color 140ms ease,
 			box-shadow 140ms ease,
 			transform 80ms ease;
+		touch-action: manipulation;
 	}
 
 	.cell:hover:not(:disabled) {
@@ -209,6 +272,39 @@
 		.mark {
 			width: 32px;
 			height: 32px;
+		}
+	}
+
+	.note {
+		position: absolute;
+		top: 6px;
+		left: 8px;
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 1;
+		padding: 2px 6px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--panel) 60%, transparent);
+		border: 1px solid var(--border);
+		color: var(--text);
+		z-index: 3;
+		pointer-events: none;
+	}
+
+	.note-exclude {
+		color: var(--danger);
+	}
+
+	.note-question {
+		color: var(--c-blue);
+	}
+
+	@media (max-width: 720px) {
+		.note {
+			top: 4px;
+			left: 6px;
+			font-size: 12px;
+			padding: 1px 5px;
 		}
 	}
 
