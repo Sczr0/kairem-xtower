@@ -7,3 +7,5 @@
 /apps/web/src/lib/wasm/pkg
 /crates/engine/pkg
 /crates/engine/src/lib/wasm/pkg
+
+docs/feature-ideas.md
