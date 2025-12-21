@@ -249,6 +249,7 @@
 		</div>
 		<div class="header-actions">
 			<a class="btn" href="/daily">日历</a>
+			<a class="btn" href="/stats">统计</a>
 			<A11yToggle />
 			<ThemeToggle />
 		</div>

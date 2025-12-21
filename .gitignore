@@ -8,4 +8,5 @@
 /crates/engine/pkg
 /crates/engine/src/lib/wasm/pkg
 
+feature-ideas.md
 docs/feature-ideas.md

@@ -139,6 +139,7 @@
 			</div>
 		</div>
 		<div class="header-right">
+			<a class="btn" href="/stats">统计</a>
 			<a class="btn" href="/editor">编辑器</a>
 			<A11yToggle />
 			<ThemeToggle />

@@ -908,6 +908,7 @@
             </div>
 			<div class="header-actions">
 				<a class="btn" href="/daily" title="每日题日历">日历</a>
+				<a class="btn" href="/stats" title="统计与成就">统计</a>
 				<a class="btn" href="/editor" title="关卡编辑器">编辑器</a>
 				<a
 					href="https://github.com/Sczr0/kairem-xtower"

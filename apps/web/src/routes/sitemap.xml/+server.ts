@@ -12,6 +12,7 @@ export const GET: RequestHandler = () => {
 		urls: [
 			{ loc: '/', lastmod: now, changefreq: 'daily', priority: '1.0' },
 			{ loc: '/daily', lastmod: now, changefreq: 'daily', priority: '0.7' },
+			{ loc: '/stats', lastmod: now, changefreq: 'daily', priority: '0.7' },
 			{ loc: '/editor', lastmod: now, changefreq: 'weekly', priority: '0.6' }
 		]
 	});
