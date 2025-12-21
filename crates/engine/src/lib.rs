@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 pub use colors::{Color, COLOR_COUNT};
 pub use difficulty::{DifficultyError, DifficultyReport};
 pub use generate::GenerateError;
+pub use solver::{HintAction, HintMove, HintResult, HintStatus};
 pub use validate::{ValidateError, ValidateResult};
 
 /// Rust 原生接口：生成 5x5 颜色布局（u8）。
@@ -67,4 +68,30 @@ pub fn difficulty_report(color_grid: Vec<u8>) -> Result<JsValue, JsValue> {
     let report =
         difficulty_report_native(&color_grid).map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&report).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// 给前端的“提示”接口：返回下一步建议/强制结论。
+///
+/// 约定：
+/// - `checked_mask` 视为“已确认勾选”的集合，其余格子仍视为未知；
+/// - 返回值为 JSON：`{status,message,move?}`。
+#[wasm_bindgen]
+pub fn hint_next(checked_mask: u32, color_grid: Vec<u8>) -> Result<JsValue, JsValue> {
+    if color_grid.len() != crate::masks::CELL_COUNT {
+        return Err(JsValue::from_str(&format!(
+            "color_grid 长度必须为 25，得到：{}",
+            color_grid.len()
+        )));
+    }
+
+    let mut colors = [Color::White; crate::masks::CELL_COUNT];
+    for (i, &v) in color_grid.iter().enumerate() {
+        colors[i] = Color::from_u8(v).ok_or_else(|| {
+            JsValue::from_str(&format!("color_grid 含非法颜色编码：index={i}, value={v}"))
+        })?;
+    }
+
+    let solver = solver::Solver::new(colors);
+    let res = solver.hint_next(checked_mask);
+    serde_wasm_bindgen::to_value(&res).map_err(|e| JsValue::from_str(&e.to_string()))
 }

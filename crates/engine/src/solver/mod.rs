@@ -1,5 +1,6 @@
 use crate::colors::Color;
 use crate::masks::{Mask, CELL_COUNT, GRID_SIZE};
+use serde::Serialize;
 
 mod state;
 
@@ -439,11 +440,211 @@ pub struct Solver {
     rules: RuleSet,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HintAction {
+    Check,
+    Uncheck,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HintMove {
+    pub cell: usize,
+    pub action: HintAction,
+    /// 是否为“逻辑强制”（传播/反证）结论。
+    pub forced: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HintStatus {
+    /// 当前勾选无法补全成任何解（需要撤销部分勾选）。
+    NoSolution,
+    /// 通过传播/反证推出的强制一步（安全提示）。
+    Forced,
+    /// 从某个可行解中抽取的一步（不保证唯一/必然）。
+    Suggested,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HintResult {
+    pub status: HintStatus,
+    pub message: String,
+    #[serde(rename = "move")]
+    pub mv: Option<HintMove>,
+}
+
 impl Solver {
     pub fn new(colors: [Color; CELL_COUNT]) -> Self {
         Self {
             rules: RuleSet::new(GRID_SIZE, colors.to_vec()),
         }
+    }
+
+    /// 提示下一步（面向 UI 的“分层提示”）：
+    ///
+    /// - 将 `checked_mask` 视为“已确认勾选”的集合，其余格子仍视为未知；
+    /// - 优先返回传播得到的强制结论，其次返回反证（传播矛盾）得到的强制结论；
+    /// - 若没有强制结论，则从任意一个可行解中抽取一步作为“建议”。
+    ///
+    /// 备注：
+    /// - 若 `checked_mask` 导致无解，会尝试给出“撤销某个勾选”的修复建议（非强制）。
+    pub fn hint_next(&self, checked_mask: Mask) -> HintResult {
+        const VALID_CELL_MASK: u32 = (1u32 << CELL_COUNT) - 1;
+        let checked_mask = checked_mask & VALID_CELL_MASK;
+
+        let Some((state, solution)) = self.solve_one_with_checked_mask(checked_mask) else {
+            // 无解：尝试找一个“撤销某个勾选后可行”的建议（用于把用户从死路拉回来）。
+            for &cell in &self.rules.decision_order {
+                let bit = 1u32 << cell;
+                if (checked_mask & bit) == 0 {
+                    continue;
+                }
+
+                let relaxed = checked_mask & !bit;
+                if self.solve_one_with_checked_mask(relaxed).is_some() {
+                    return HintResult {
+                        status: HintStatus::Suggested,
+                        message: format!(
+                            "当前勾选无法补全成解。建议先取消勾选：({},{})",
+                            (cell / self.rules.size) + 1,
+                            (cell % self.rules.size) + 1
+                        ),
+                        mv: Some(HintMove {
+                            cell,
+                            action: HintAction::Uncheck,
+                            forced: false,
+                        }),
+                    };
+                }
+            }
+
+            return HintResult {
+                status: HintStatus::NoSolution,
+                message: "当前勾选无法补全成解：请尝试撤销部分勾选后再求提示。".to_string(),
+                mv: None,
+            };
+        };
+
+        // 1) 传播阶段已经推出的强制“必须勾选”优先返回（最直观）。
+        for &cell in &self.rules.decision_order {
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) == 0 && state.is_checked_id(cell) {
+                return HintResult {
+                    status: HintStatus::Forced,
+                    message: format!(
+                        "根据当前信息可推出：({},{}) 必须勾选。",
+                        (cell / self.rules.size) + 1,
+                        (cell % self.rules.size) + 1
+                    ),
+                    mv: Some(HintMove {
+                        cell,
+                        action: HintAction::Check,
+                        forced: true,
+                    }),
+                };
+            }
+        }
+
+        // 2) 传播推出的“必须不勾选”也属于强制，但对 UI 来说不如“勾哪一格”直观。
+        for &cell in &self.rules.decision_order {
+            if state.is_unchecked_id(cell) {
+                return HintResult {
+                    status: HintStatus::Forced,
+                    message: format!(
+                        "根据当前信息可推出：({},{}) 必须不勾选。",
+                        (cell / self.rules.size) + 1,
+                        (cell % self.rules.size) + 1
+                    ),
+                    mv: Some(HintMove {
+                        cell,
+                        action: HintAction::Uncheck,
+                        forced: true,
+                    }),
+                };
+            }
+        }
+
+        // 3) 反证（传播矛盾）推出的强制一步：依然是“安全提示”。
+        let mut budget = 10_000u32;
+        if let Some((cell, forced_checked, _obs, _scarcity)) =
+            self.find_forced_by_contradiction(&state, &mut budget)
+        {
+            return HintResult {
+                status: HintStatus::Forced,
+                message: format!(
+                    "通过反证可推出：({},{}) 必须{}。",
+                    (cell / self.rules.size) + 1,
+                    (cell % self.rules.size) + 1,
+                    if forced_checked { "勾选" } else { "不勾选" }
+                ),
+                mv: Some(HintMove {
+                    cell,
+                    action: if forced_checked {
+                        HintAction::Check
+                    } else {
+                        HintAction::Uncheck
+                    },
+                    forced: true,
+                }),
+            };
+        }
+
+        // 4) 没有强制结论：从一个可行解中抽取一步（建议）。
+        for &cell in &self.rules.decision_order {
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) == 0 && (solution & bit) != 0 {
+                return HintResult {
+                    status: HintStatus::Suggested,
+                    message: format!(
+                        "给出一个可能有帮助的下一步：尝试勾选 ({},{})。",
+                        (cell / self.rules.size) + 1,
+                        (cell % self.rules.size) + 1
+                    ),
+                    mv: Some(HintMove {
+                        cell,
+                        action: HintAction::Check,
+                        forced: false,
+                    }),
+                };
+            }
+        }
+
+        HintResult {
+            status: HintStatus::Suggested,
+            message: "当前勾选已能补全成解，但暂无可直接给出的“一步提示”。".to_string(),
+            mv: None,
+        }
+    }
+
+    fn solve_one_with_checked_mask(&self, checked_mask: Mask) -> Option<(SolverState, Mask)> {
+        let mut state = SolverState::new(self.rules.size);
+
+        for &id in &self.rules.black_cells {
+            if state.set_checked_id(id).is_err() {
+                return None;
+            }
+        }
+
+        // 将 checked_mask 视为“已确认勾选”，其余保持未知。
+        for &cell in &self.rules.decision_order {
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) != 0 {
+                if state.set_checked_id(cell).is_err() {
+                    return None;
+                }
+            }
+        }
+
+        // 先传播到不再变化，尽早发现矛盾，并为“强制提示”准备信息。
+        let mut obs = ();
+        if !self.propagate_to_fixpoint(&mut state, &mut obs) {
+            return None;
+        }
+
+        let mut out = Vec::new();
+        self.search(state.clone(), 1, &mut out, 0, &mut obs);
+        out.first().copied().map(|mask| (state, mask))
     }
 
     /// 求解并返回最多 `limit` 个解（limit=0 视为不限制）。
@@ -1516,5 +1717,20 @@ mod tests {
             .collect();
 
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn hint_does_not_claim_no_solution_for_generated_puzzle() {
+        let grid = crate::generate::generate_puzzle(123).expect("generate ok");
+        let flat: Vec<u8> = grid.into_iter().flatten().collect();
+
+        let mut colors = [Color::White; CELL_COUNT];
+        for (i, v) in flat.into_iter().enumerate() {
+            colors[i] = Color::from_u8(v).expect("valid color");
+        }
+
+        let solver = Solver::new(colors);
+        let hint = solver.hint_next(0u32);
+        assert!(!matches!(hint.status, HintStatus::NoSolution));
     }
 }

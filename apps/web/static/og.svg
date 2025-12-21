@@ -1,39 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!--
+    设计说明（2025-12-20，Codex）：
+    - 移除蓝紫渐变，使用“深色底 + 卡片化布局 + 语义色点缀”的前端一致风格。
+    - 图标与棋盘预览复用 Matrix 组件的视觉语言：圆角格子、左侧颜色条、X 标记。
+  -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b1220"/>
-      <stop offset="1" stop-color="#111827"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#a78bfa"/>
-    </linearGradient>
+    <radialGradient id="bg" cx="22%" cy="18%" r="120%">
+      <stop offset="0" stop-color="#14151c"/>
+      <stop offset="1" stop-color="#0b0c10"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
   </defs>
 
   <rect width="1200" height="630" fill="url(#bg)"/>
-  <rect x="72" y="72" width="1056" height="486" rx="36" fill="#0f172a" stroke="#243044" stroke-width="2"/>
 
-  <rect x="110" y="110" width="96" height="96" rx="22" fill="url(#accent)"/>
-  <text x="230" y="180" fill="#e5e7eb" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="56" font-weight="800">聪明Bingo</text>
-  <text x="110" y="265" fill="#9ca3af" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="28">
-    每日逻辑益智游戏 · 达成 Bingo · 支持种子分享
+  <!-- 主卡片 -->
+  <rect x="72" y="72" width="1056" height="486" rx="36" fill="#121212" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2" filter="url(#shadow)"/>
+
+  <!-- 左上角站点图标（与 favicon 同构） -->
+  <g transform="translate(110,110)">
+    <rect x="0" y="0" width="96" height="96" rx="22" fill="#0b0c10"/>
+    <rect x="0.9" y="0.9" width="94.2" height="94.2" rx="21.1" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1.8"/>
+    <rect x="24" y="24" width="48" height="48" rx="10" fill="#f8fafc"/>
+    <rect x="24" y="24" width="6" height="48" rx="3" fill="#22c55e" opacity="0.96"/>
+    <path d="M38 38L58 58M38 58L58 38" fill="none" stroke="#0b0c10" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="230" y="176" fill="#f8fafc" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="60" font-weight="850">聪明Bingo</text>
+  <text x="230" y="228" fill="#cbd5e1" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="28">
+    每日逻辑益智游戏 · 规则驱动 · 支持种子分享
   </text>
 
-  <g transform="translate(110,315)">
-    <rect x="0" y="0" width="780" height="210" rx="20" fill="#0b1220" stroke="#1f2937"/>
-    <g opacity="0.95">
-      <rect x="18" y="18" width="54" height="54" rx="12" fill="#60a5fa"/>
-      <rect x="84" y="18" width="54" height="54" rx="12" fill="#a78bfa"/>
-      <rect x="150" y="18" width="54" height="54" rx="12" fill="#34d399"/>
-      <rect x="216" y="18" width="54" height="54" rx="12" fill="#fbbf24"/>
-      <rect x="282" y="18" width="54" height="54" rx="12" fill="#fb7185"/>
+  <!-- 预览区：矩阵 + 语义色 + 文案 -->
+  <g transform="translate(110,290)">
+    <rect x="0" y="0" width="980" height="240" rx="24" fill="#1b1b1b" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+
+    <!-- 矩阵预览 -->
+    <g transform="translate(26,26)">
+      <rect x="0" y="0" width="250" height="188" rx="18" fill="#121212" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+
+      <!-- Bingo 行高亮 -->
+      <rect x="16" y="90" width="218" height="38" rx="12" fill="#22c55e" opacity="0.10"/>
+
+      <g transform="translate(16,16)" stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.5">
+        <!-- 参数：cell=34, gap=8, bar=5 -->
+        <!-- row 0 -->
+        <g transform="translate(0,0)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22c55e" opacity="0.95"/>
+        </g>
+        <g transform="translate(42,0)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#facc15" opacity="0.95"/>
+        </g>
+        <g transform="translate(84,0)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb923c" opacity="0.95"/>
+        </g>
+        <g transform="translate(126,0)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb7185" opacity="0.95"/>
+        </g>
+        <g transform="translate(168,0)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22d3ee" opacity="0.95"/>
+        </g>
+
+        <!-- row 1 -->
+        <g transform="translate(0,42)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#facc15" opacity="0.95"/>
+        </g>
+        <g transform="translate(42,42)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb923c" opacity="0.95"/>
+        </g>
+        <g transform="translate(84,42)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22c55e" opacity="0.95"/>
+        </g>
+        <g transform="translate(126,42)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22d3ee" opacity="0.95"/>
+        </g>
+        <g transform="translate(168,42)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb7185" opacity="0.95"/>
+        </g>
+
+        <!-- row 2 (bingo) -->
+        <g transform="translate(0,84)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22c55e" opacity="0.95"/>
+          <path d="M12 12L22 22M12 22L22 12" stroke="#f8fafc" stroke-opacity="0.94" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g transform="translate(42,84)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#facc15" opacity="0.95"/>
+          <path d="M12 12L22 22M12 22L22 12" stroke="#f8fafc" stroke-opacity="0.94" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g transform="translate(84,84)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb923c" opacity="0.95"/>
+          <path d="M12 12L22 22M12 22L22 12" stroke="#f8fafc" stroke-opacity="0.94" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g transform="translate(126,84)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb7185" opacity="0.95"/>
+          <path d="M12 12L22 22M12 22L22 12" stroke="#f8fafc" stroke-opacity="0.94" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g transform="translate(168,84)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22d3ee" opacity="0.95"/>
+          <path d="M12 12L22 22M12 22L22 12" stroke="#f8fafc" stroke-opacity="0.94" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- row 3 -->
+        <g transform="translate(0,126)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22d3ee" opacity="0.95"/>
+        </g>
+        <g transform="translate(42,126)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb7185" opacity="0.95"/>
+        </g>
+        <g transform="translate(84,126)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#facc15" opacity="0.95"/>
+        </g>
+        <g transform="translate(126,126)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22c55e" opacity="0.95"/>
+        </g>
+        <g transform="translate(168,126)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb923c" opacity="0.95"/>
+        </g>
+
+        <!-- row 4 -->
+        <g transform="translate(0,168)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb7185" opacity="0.95"/>
+        </g>
+        <g transform="translate(42,168)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22d3ee" opacity="0.95"/>
+        </g>
+        <g transform="translate(84,168)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#fb923c" opacity="0.95"/>
+        </g>
+        <g transform="translate(126,168)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#facc15" opacity="0.95"/>
+        </g>
+        <g transform="translate(168,168)">
+          <rect width="34" height="34" rx="8" fill="#2d2d2d"/><rect x="0" y="0" width="5" height="34" rx="3" fill="#22c55e" opacity="0.95"/>
+        </g>
+      </g>
     </g>
-    <text x="18" y="140" fill="#e5e7eb" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="34" font-weight="750">
+
+    <!-- 语义色示例（避免蓝紫渐变） -->
+    <g transform="translate(320,38)" opacity="0.95">
+      <rect x="0" y="0" width="54" height="54" rx="14" fill="#22c55e"/>
+      <rect x="66" y="0" width="54" height="54" rx="14" fill="#facc15"/>
+      <rect x="132" y="0" width="54" height="54" rx="14" fill="#fb923c"/>
+      <rect x="198" y="0" width="54" height="54" rx="14" fill="#fb7185"/>
+      <rect x="264" y="0" width="54" height="54" rx="14" fill="#22d3ee"/>
+    </g>
+
+    <text x="320" y="146" fill="#f8fafc" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="36" font-weight="800">
       轻量 · 规则清晰 · 分享即玩
     </text>
-    <text x="18" y="182" fill="#9ca3af" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="22">
+    <text x="320" y="186" fill="#cbd5e1" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="22">
       kairem.xtower.site
+    </text>
+    <text x="320" y="214" fill="#94a3b8" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="18">
+      今日题 · 随机种子 · 一键分享
     </text>
   </g>
 </svg>
-

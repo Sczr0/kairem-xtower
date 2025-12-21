@@ -23,11 +23,28 @@ export type DifficultyReport = {
 	stats: DifficultyStats;
 };
 
+export type HintAction = 'check' | 'uncheck';
+
+export type HintMove = {
+	cell: number;
+	action: HintAction;
+	forced: boolean;
+};
+
+export type HintStatus = 'no_solution' | 'forced' | 'suggested';
+
+export type HintResult = {
+	status: HintStatus;
+	message: string;
+	move?: HintMove;
+};
+
 export type Engine = {
 	date_to_seed_ymd(date: string): bigint;
 	generate_puzzle(seed: bigint): number[][];
 	validate_state(checked_mask: number, color_grid: Uint8Array): ValidateResult;
 	difficulty_report(color_grid: Uint8Array): DifficultyReport;
+	hint_next(checked_mask: number, color_grid: Uint8Array): HintResult;
 };
 
 // 说明：

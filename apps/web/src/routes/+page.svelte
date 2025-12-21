@@ -6,7 +6,13 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import rules from '$lib/rules.json';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
-	import { loadEngine, type DifficultyReport, type Engine, type ValidateResult } from '$lib/wasm/load';
+	import {
+		loadEngine,
+		type DifficultyReport,
+		type Engine,
+		type HintResult,
+		type ValidateResult
+	} from '$lib/wasm/load';
 	import { browser, dev } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
@@ -33,6 +39,10 @@
 	let hoveredRuleId: string | null = null;
 	let activeCellIndex: number | null = null;
 	let allRulesOpen = false;
+	let hint: HintResult | null = null;
+	let hintIndex: number | null = null;
+	let hintAction: 'check' | 'uncheck' | null = null;
+	let hintLoading = false;
 
 	type Rule = UiRule;
 	const allRules = (rules.rules ?? []) as Rule[];
@@ -134,6 +144,12 @@
 		}, 2000);
 	}
 
+	function clearHint() {
+		hint = null;
+		hintIndex = null;
+		hintAction = null;
+	}
+
 	function selectAll(event: Event) {
 		const input = event.currentTarget as HTMLInputElement | null;
 		input?.select();
@@ -176,11 +192,63 @@
 		checkedMask = (checkedMask ^ (1 << i)) >>> 0;
 		focusRuleByIndex(i);
 		refreshValidate();
+		clearHint();
 	}
 
 	function handleHover(index: number | null) {
 		if (index === null) return;
 		focusRuleByIndex(index);
+	}
+
+	async function requestHint() {
+		if (!engine) return;
+		if (validate?.is_valid && validate?.is_bingo) {
+			showToast('已通关：无需提示');
+			return;
+		}
+
+		hintLoading = true;
+		try {
+			const res = engine.hint_next(checkedMask >>> 0, new Uint8Array(grid));
+			hint = res;
+			const mv = res.move ?? null;
+			if (mv) {
+				hintIndex = mv.cell;
+				hintAction = mv.action;
+				focusRuleByIndex(mv.cell);
+			} else {
+				hintIndex = null;
+				hintAction = null;
+			}
+		} catch (e) {
+			clearHint();
+			showToast(`提示失败：${String(e)}`);
+		} finally {
+			hintLoading = false;
+		}
+	}
+
+	function applyHintMove() {
+		const mv = hint?.move;
+		if (!mv) return;
+		const i = mv.cell;
+		const isChecked = ((checkedMask >>> 0) & (1 << i)) !== 0;
+
+		if (mv.action === 'check') {
+			if (isChecked) {
+				showToast('该格已勾选');
+				return;
+			}
+			toggle(i);
+			return;
+		}
+
+		// uncheck
+		if (!isChecked) {
+			showToast('该格当前未勾选');
+			return;
+		}
+		toggle(i);
 	}
 
 	async function loadPuzzleBySeed(newSeed: bigint, opts: { updateUrl?: boolean } = {}) {
@@ -191,6 +259,7 @@
 		checkedMask = blackMaskFromGrid(grid);
 		hoveredRuleId = null;
 		activeCellIndex = null;
+		clearHint();
 		refreshValidate();
 		refreshDifficulty();
 		if (opts.updateUrl) replaceUrlSeed(seed);
@@ -359,6 +428,8 @@
 						grid={grid}
 						checkedMask={checkedMask}
 						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
+						hintIndex={hintIndex}
+						hintAction={hintAction}
 						onToggle={toggle}
 						onHover={handleHover}
 					/>
@@ -403,6 +474,48 @@
                         </ul>
                     </details>
                 </div>
+
+				<!-- 1.5 提示：优先给出“安全一步”，卡住时再用“建议一步” -->
+				<div class="sidebar-card hint-section">
+					<div class="panel-header hint-header">
+						<h2 class="panel-title">提示</h2>
+						<div class="hint-actions">
+							<button class="btn btn-primary" on:click={requestHint} disabled={!engine || hintLoading} title="给我一步提示">
+								{hintLoading ? '提示中…' : '给我提示'}
+							</button>
+							{#if hint?.move}
+								<button class="btn" on:click={applyHintMove} disabled={hintLoading} title="应用该提示">
+									应用
+								</button>
+							{/if}
+							{#if hint}
+								<button class="btn btn-ghost" on:click={clearHint} disabled={hintLoading} title="清除提示高亮">
+									清除
+								</button>
+							{/if}
+						</div>
+						{#if !hint}
+							<p class="panel-hint">优先给安全一步；若无强制结论，会给一个建议方向。</p>
+						{/if}
+					</div>
+
+					{#if hint}
+						<div class="hint-body">
+							<div class="hint-message">{hint.message}</div>
+							{#if hint.move}
+								<div class="hint-meta">
+									<span class="hint-badge {hint.move.forced ? 'safe' : 'suggest'}">
+										{hint.move.forced ? '安全提示' : '建议'}
+									</span>
+									<span class="hint-op">
+										{hint.move.action === 'check' ? '勾选' : '取消勾选'} 格子
+										({Math.floor(hint.move.cell / 5) + 1},{(hint.move.cell % 5) + 1})
+									</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
 
                 <!-- 2. 规则面板 -->
 				<div class="sidebar-card rules-panel">
@@ -704,6 +817,69 @@
         color: var(--muted);
         line-height: 1.55;
     }
+
+	.hint-header {
+		display: grid;
+		gap: 10px;
+	}
+
+	.hint-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 8px;
+	}
+
+	.hint-body {
+		margin-top: 10px;
+		padding: 10px 12px;
+		background: var(--bg-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--inset-highlight);
+	}
+
+	.hint-message {
+		font-size: 0.9rem;
+		color: var(--text);
+		line-height: 1.5;
+	}
+
+	.hint-meta {
+		margin-top: 8px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		color: var(--muted);
+	}
+
+	.hint-badge {
+		font-size: 0.7rem;
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-weight: 800;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		color: var(--muted);
+	}
+
+	.hint-badge.safe {
+		background: color-mix(in srgb, var(--success) 12%, var(--panel));
+		color: color-mix(in srgb, var(--success) 70%, var(--text));
+		border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+	}
+
+	.hint-badge.suggest {
+		background: color-mix(in srgb, var(--c-blue) 10%, var(--panel));
+		color: color-mix(in srgb, var(--c-blue) 72%, var(--text));
+		border-color: color-mix(in srgb, var(--c-blue) 32%, var(--border));
+	}
+
+	.hint-op {
+		font-size: 0.85rem;
+	}
 
     .rules-panel {
         padding: 0;

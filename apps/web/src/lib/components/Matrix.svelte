@@ -10,6 +10,9 @@
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
 	export let onHover: (index: number | null) => void = () => {};
+	// 提示高亮：仅用于 UI 引导，不影响逻辑。
+	export let hintIndex: number | null = null;
+	export let hintAction: 'check' | 'uncheck' | null = null;
 
 	// 注意：不要把 checkedMask 依赖藏在函数闭包里，否则 Svelte 可能不会在 mask 更新时重算模板。
 	// 这里用响应式语句显式建立依赖关系，保证勾选样式能即时更新。
@@ -30,7 +33,7 @@
 		<div class="cell-wrapper">
 			<button
 				type="button"
-				class="cell {checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'}"
+				class="cell {checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {hintIndex === i ? 'hint' : ''} {hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
 				style="--cell-color: {colorToCss(grid[i])}"
 				aria-pressed={checkedFlags[i]}
 				disabled={blackFlags[i]}
@@ -199,6 +202,26 @@
 		outline: 2px solid var(--danger);
 		outline-offset: 2px;
 		z-index: 10;
+	}
+
+	.cell.hint {
+		/* 用 ring 而不是 outline，避免与 invalid 的 outline 冲突 */
+		z-index: 9;
+		box-shadow:
+			0 0 0 3px color-mix(in srgb, var(--c-blue) 45%, transparent),
+			var(--inset-highlight);
+	}
+
+	.cell.hint-check {
+		box-shadow:
+			0 0 0 3px color-mix(in srgb, var(--success) 45%, transparent),
+			var(--inset-highlight);
+	}
+
+	.cell.hint-uncheck {
+		box-shadow:
+			0 0 0 3px color-mix(in srgb, var(--danger) 45%, transparent),
+			var(--inset-highlight);
 	}
 
 	.error-indicator {
