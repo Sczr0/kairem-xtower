@@ -1276,9 +1276,76 @@
 						</div>
 					</details>
 				{/if}
+
+				<!-- 规则面板：放在棋盘下方，便于对照理解 -->
+				<div class="sidebar-card rules-panel rules-below">
+					<div class="panel-header">
+						<h2 class="panel-title">规则详情</h2>
+						{#if !hoveredRule}
+							<p class="panel-hint">悬停或点击格子定位规则</p>
+						{/if}
+					</div>
+
+					<!-- 动态高亮区域：当“全部规则”展开时隐藏，避免重复呈现造成不协调 -->
+					{#if !allRulesOpen}
+						<div class="active-rule-section">
+							{#if hoveredRule}
+								<div class="section-label">当前关注</div>
+								<div transition:slide={{ duration: 200 }}>
+									<RuleCard rule={hoveredRule} color={ruleColorCss(hoveredRule.id)} highlighted />
+								</div>
+							{:else}
+								<div class="empty-placeholder">
+									<span>移动鼠标查看规则</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					{#if validate && activeCellIndex !== null && !validate.cell_ok[activeCellIndex] && validate.cell_messages[activeCellIndex]}
+						<div class="cell-error-section">
+							<div class="section-label">冲突原因</div>
+							<div class="cell-error-box">
+								<div class="cell-error-meta">
+									格子 ({Math.floor(activeCellIndex / 5) + 1},{(activeCellIndex % 5) + 1})
+								</div>
+								<div class="cell-error-text">{validate.cell_messages[activeCellIndex]}</div>
+							</div>
+						</div>
+					{/if}
+
+					{#if goalRule}
+						<div class="static-rule-section">
+							<div class="section-label">通关目标</div>
+							<RuleCard rule={goalRule} color={ruleColorCss(goalRule.id)} />
+						</div>
+					{/if}
+
+					<details
+						class="all-rules-details"
+						bind:this={allRulesDetailsEl}
+						on:toggle={(e) => (allRulesOpen = (e.currentTarget as HTMLDetailsElement).open)}
+					>
+						<summary>
+							全部规则 <span class="badge-count">{allRules.length}</span>
+						</summary>
+						<div class="rules-grid">
+							{#each allRules as r}
+								<div class="rule-item" use:ruleRef={r.id}>
+									<RuleCard
+										rule={r}
+										color={ruleColorCss(r.id)}
+										highlighted={hoveredRuleId === r.id}
+										highlightTone="soft"
+									/>
+								</div>
+							{/each}
+						</div>
+					</details>
+				</div>
 			</main>
 
-			<!-- 右侧：规则与帮助 -->
+			<!-- 右侧：帮助/存档/提示 -->
 			<aside class="card sidebar">
                 <!-- 1. 帮助移到这里，并设为折叠，节省空间 -->
                 <div class="sidebar-card help-section">
@@ -1287,7 +1354,7 @@
                         <ul class="help-list">
                             <li><strong>点击非黑格：</strong>切换勾选状态。</li>
                             <li><strong>黑格：</strong>已锁定，必须勾选。</li>
-                            <li><strong>红框/叹号：</strong>违反规则，原因会显示在右侧“规则详情”里。</li>
+                            <li><strong>红框/叹号：</strong>违反规则，原因会显示在棋盘下方“规则详情”里。</li>
                         </ul>
                     </details>
                 </div>
@@ -1410,72 +1477,6 @@
 					{/if}
 				</div>
 
-                <!-- 2. 规则面板 -->
-				<div class="sidebar-card rules-panel">
-					<div class="panel-header">
-						<h2 class="panel-title">规则详情</h2>
-                        {#if !hoveredRule}
-						    <p class="panel-hint">悬停或点击格子定位规则</p>
-                        {/if}
-					</div>
-
-                    <!-- 动态高亮区域：当“全部规则”展开时隐藏，避免重复呈现造成不协调 -->
-					{#if !allRulesOpen}
-						<div class="active-rule-section">
-							{#if hoveredRule}
-								<div class="section-label">当前关注</div>
-								<div transition:slide={{ duration: 200 }}>
-									<RuleCard rule={hoveredRule} color={ruleColorCss(hoveredRule.id)} highlighted />
-								</div>
-							{:else}
-								<div class="empty-placeholder">
-									<span>移动鼠标查看规则</span>
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					{#if validate && activeCellIndex !== null && !validate.cell_ok[activeCellIndex] && validate.cell_messages[activeCellIndex]}
-						<div class="cell-error-section">
-							<div class="section-label">冲突原因</div>
-							<div class="cell-error-box">
-								<div class="cell-error-meta">
-									格子 ({Math.floor(activeCellIndex / 5) + 1},{(activeCellIndex % 5) + 1})
-								</div>
-								<div class="cell-error-text">{validate.cell_messages[activeCellIndex]}</div>
-							</div>
-						</div>
-					{/if}
-
-					{#if goalRule}
-						<div class="static-rule-section">
-							<div class="section-label">通关目标</div>
-							<RuleCard rule={goalRule} color={ruleColorCss(goalRule.id)} />
-						</div>
-					{/if}
-
-					<details
-						class="all-rules-details"
-						bind:this={allRulesDetailsEl}
-						on:toggle={(e) => (allRulesOpen = (e.currentTarget as HTMLDetailsElement).open)}
-					>
-						<summary>
-							全部规则 <span class="badge-count">{allRules.length}</span>
-						</summary>
-						<div class="rules-grid">
-							{#each allRules as r}
-								<div class="rule-item" use:ruleRef={r.id}>
-									<RuleCard
-										rule={r}
-										color={ruleColorCss(r.id)}
-										highlighted={hoveredRuleId === r.id}
-										highlightTone="soft"
-									/>
-								</div>
-							{/each}
-						</div>
-					</details>
-				</div>
 			</aside>
 		</div>
 	{/if}
@@ -1908,6 +1909,10 @@
     .rules-panel {
         padding: 0;
     }
+
+	.rules-below {
+		margin-top: 16px;
+	}
 
     .panel-header {
         margin: 18px 0 14px;
