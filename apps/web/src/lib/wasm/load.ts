@@ -33,10 +33,19 @@ export type HintMove = {
 
 export type HintStatus = 'no_solution' | 'forced' | 'suggested';
 
+export type HintReasonKind = 'propagate' | 'contradiction' | 'suggest' | 'repair';
+
+export type HintReason = {
+	kind: HintReasonKind;
+	ruleId?: string;
+	affectedCells?: number[];
+};
+
 export type HintResult = {
 	status: HintStatus;
 	message: string;
 	move?: HintMove;
+	reason?: HintReason;
 };
 
 export type SolutionCountResult = {

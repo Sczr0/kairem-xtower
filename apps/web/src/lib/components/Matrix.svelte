@@ -10,6 +10,8 @@
 	export let marks: number[] = Array.from({ length: 25 }, () => 0);
 	// 色盲模式：叠加字母/纹理提示（仅 UI，默认关闭）
 	export let colorBlindMode = false;
+	// 提示解释高亮（结构化 reason 的 affectedCells）
+	export let highlightCells: number[] = [];
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
 	export let onMarkCycle: (index: number) => void = () => {};
@@ -26,6 +28,7 @@
 	// 这里用响应式语句显式建立依赖关系，保证勾选样式能即时更新。
 	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
+	$: explainFlags = indices.map((i) => (highlightCells ?? []).includes(i));
 
 	const cellEls: (HTMLButtonElement | null)[] = Array.from({ length: 25 }, () => null);
 
@@ -215,7 +218,7 @@
 		<div class="cell-wrapper">
 			<button
 				type="button"
-				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
+				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && explainFlags[i] ? 'explain' : ''} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
 				style="--cell-color: {colorToCss(grid[i])}"
 				aria-pressed={mode === 'play' ? checkedFlags[i] : undefined}
 				aria-label={cellAriaLabel(i)}
@@ -380,6 +383,13 @@
 	
 	.cell.checked .color-bar {
 		opacity: 1;
+	}
+
+	.cell.explain {
+		/* 与 hint ring 不冲突：更轻的“底色强调” */
+		box-shadow:
+			0 0 0 3px color-mix(in srgb, var(--c-blue) 20%, transparent),
+			var(--inset-highlight);
 	}
 
 	.mark {

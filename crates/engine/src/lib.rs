@@ -17,7 +17,7 @@ use wasm_bindgen::prelude::*;
 pub use colors::{Color, COLOR_COUNT};
 pub use difficulty::{DifficultyError, DifficultyReport};
 pub use generate::GenerateError;
-pub use solver::{HintAction, HintMove, HintResult, HintStatus};
+pub use solver::{HintAction, HintMove, HintReason, HintReasonKind, HintResult, HintStatus};
 pub use validate::{ValidateError, ValidateResult};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

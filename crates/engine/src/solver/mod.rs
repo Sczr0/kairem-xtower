@@ -14,6 +14,7 @@ fn cell_id(row: usize, col: usize, size: usize) -> usize {
 #[derive(Clone, Debug)]
 struct RuleSet {
     size: usize,
+    colors: Vec<Color>,
 
     black_cells: Vec<usize>,
     blue_cells: Vec<usize>,
@@ -130,6 +131,7 @@ impl RuleSet {
 
         Self {
             size,
+            colors,
             black_cells,
             blue_cells,
             red_cells,
@@ -466,18 +468,60 @@ pub enum HintStatus {
     Suggested,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HintReasonKind {
+    /// 约束传播得到的结论。
+    Propagate,
+    /// 反证（尝试某分支导致无解）得到的结论。
+    Contradiction,
+    /// 从某个可行解抽取的“可能有帮助”的一步。
+    Suggest,
+    /// 无解时的“修复建议”（撤销某个勾选）。
+    Repair,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HintReason {
+    pub kind: HintReasonKind,
+    /// 相关规则（与前端 `rules.json` 的 id 对齐，如 red/blue/.../black/bingo）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<&'static str>,
+    /// 需要在 UI 中强调的格子（可用于高亮）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_cells: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HintResult {
     pub status: HintStatus,
     pub message: String,
     #[serde(rename = "move")]
     pub mv: Option<HintMove>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<HintReason>,
 }
 
 impl Solver {
     pub fn new(colors: [Color; CELL_COUNT]) -> Self {
         Self {
             rules: RuleSet::new(GRID_SIZE, colors.to_vec()),
+        }
+    }
+
+    fn rule_id_for_cell(&self, cell: usize) -> Option<&'static str> {
+        let c = *self.rules.colors.get(cell)?;
+        match c {
+            Color::Red => Some("red"),
+            Color::Blue => Some("blue"),
+            Color::Green => Some("green"),
+            Color::Yellow => Some("yellow"),
+            Color::Purple => Some("purple"),
+            Color::Orange => Some("orange"),
+            Color::Cyan => Some("cyan"),
+            Color::Black => Some("black"),
+            _ => None,
         }
     }
 
@@ -515,6 +559,11 @@ impl Solver {
                             action: HintAction::Uncheck,
                             forced: false,
                         }),
+                        reason: Some(HintReason {
+                            kind: HintReasonKind::Repair,
+                            rule_id: self.rule_id_for_cell(cell),
+                            affected_cells: vec![cell],
+                        }),
                     };
                 }
             }
@@ -523,6 +572,7 @@ impl Solver {
                 status: HintStatus::NoSolution,
                 message: "当前勾选无法补全成解：请尝试撤销部分勾选后再求提示。".to_string(),
                 mv: None,
+                reason: None,
             };
         };
 
@@ -541,6 +591,11 @@ impl Solver {
                         cell,
                         action: HintAction::Check,
                         forced: true,
+                    }),
+                    reason: Some(HintReason {
+                        kind: HintReasonKind::Propagate,
+                        rule_id: self.rule_id_for_cell(cell),
+                        affected_cells: vec![cell],
                     }),
                 };
             }
@@ -572,6 +627,11 @@ impl Solver {
                     action: HintAction::Uncheck,
                     forced: true,
                 }),
+                reason: Some(HintReason {
+                    kind: HintReasonKind::Propagate,
+                    rule_id: self.rule_id_for_cell(cell),
+                    affected_cells: vec![cell],
+                }),
             };
         }
 
@@ -598,6 +658,11 @@ impl Solver {
                             action: HintAction::Check,
                             forced: true,
                         }),
+                        reason: Some(HintReason {
+                            kind: HintReasonKind::Contradiction,
+                            rule_id: self.rule_id_for_cell(cell),
+                            affected_cells: vec![cell],
+                        }),
                     };
                 }
             } else if (checked_mask & bit) != 0 {
@@ -613,6 +678,11 @@ impl Solver {
                         cell,
                         action: HintAction::Uncheck,
                         forced: true,
+                    }),
+                    reason: Some(HintReason {
+                        kind: HintReasonKind::Contradiction,
+                        rule_id: self.rule_id_for_cell(cell),
+                        affected_cells: vec![cell],
                     }),
                 };
             }
@@ -634,6 +704,11 @@ impl Solver {
                         action: HintAction::Check,
                         forced: false,
                     }),
+                    reason: Some(HintReason {
+                        kind: HintReasonKind::Suggest,
+                        rule_id: self.rule_id_for_cell(cell),
+                        affected_cells: vec![cell],
+                    }),
                 };
             }
         }
@@ -642,6 +717,7 @@ impl Solver {
             status: HintStatus::Suggested,
             message: "当前勾选已能补全成解，但暂无可直接给出的“一步提示”。".to_string(),
             mv: None,
+            reason: None,
         }
     }
 
@@ -1819,7 +1895,15 @@ mod tests {
 
         let solver = Solver::new(colors);
         let hint = solver.hint_next(black_mask);
-        if let Some(mv) = hint.mv {
+        if let Some(mv) = hint.mv.clone() {
+            // 约定：只要给出了可执行 move，就应给出结构化 reason（用于前端高质量解释）。
+            assert!(hint.reason.is_some(), "hint.move exists but hint.reason is None");
+            if let Some(reason) = hint.reason.as_ref() {
+                assert!(
+                    reason.affected_cells.contains(&mv.cell),
+                    "reason.affected_cells should include move cell"
+                );
+            }
             if matches!(mv.action, HintAction::Uncheck) {
                 assert_ne!(
                     black_mask & (1u32 << mv.cell),

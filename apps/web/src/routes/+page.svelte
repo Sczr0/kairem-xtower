@@ -34,9 +34,10 @@
 		type ValidateResult
 	} from '$lib/wasm/load';
 	import { browser, dev } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
 	import { colorBlindEnabled } from '$lib/a11y';
+	import { readTutorialDismissedAt, setTutorialDismissed, shouldAutoShowTutorial } from '$lib/tutorial.js';
 
 	// --- 逻辑部分保持不变 ---
 	let engine: Engine | null = null;
@@ -52,6 +53,13 @@
 	let shareToast = '';
 	let shareUrlForManualCopy = '';
 	let shareManualVisible = false;
+
+	let tutorialOpen = false;
+	let tutorialDontAutoShow = true;
+	let tutorialDismissedAt: string | null = null;
+	let tutorialDialogEl: HTMLDivElement | null = null;
+	let tutorialLastActiveEl: HTMLElement | null = null;
+	let tutorialBodyOverflowBefore: string | null = null;
 
 	let grid2d: number[][] = [];
 	let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
@@ -76,8 +84,20 @@
 	let hintAction: 'check' | 'uncheck' | null = null;
 	let hintLoading = false;
 	let hintExplain: string | null = null;
+	let hintExplainCells: number[] = [];
 	let totalTimeMs = 0;
 	let clockTick = 0;
+	let allRulesDetailsEl: HTMLDetailsElement | null = null;
+	let ruleCardEls: Record<string, HTMLElement | null> = {};
+
+	function ruleRef(node: HTMLElement, id: string) {
+		ruleCardEls[id] = node;
+		return {
+			destroy() {
+				if (ruleCardEls[id] === node) delete ruleCardEls[id];
+			}
+		};
+	}
 
 	type Rule = UiRule;
 	const allRules = (rules.rules ?? []) as Rule[];
@@ -277,6 +297,97 @@
 		hint = null;
 		hintIndex = null;
 		hintAction = null;
+		hintExplainCells = [];
+	}
+
+	function lockBodyScrollForTutorial() {
+		if (!browser) return;
+		if (tutorialBodyOverflowBefore === null) {
+			tutorialBodyOverflowBefore = document.body.style.overflow ?? '';
+		}
+		document.body.style.overflow = 'hidden';
+	}
+
+	function unlockBodyScrollForTutorial() {
+		if (!browser) return;
+		if (tutorialBodyOverflowBefore !== null) {
+			document.body.style.overflow = tutorialBodyOverflowBefore;
+			tutorialBodyOverflowBefore = null;
+		}
+	}
+
+	function restoreFocusAfterTutorial() {
+		if (!browser) return;
+		const el = tutorialLastActiveEl;
+		tutorialLastActiveEl = null;
+		el?.focus?.();
+	}
+
+	function cleanupTutorialUi() {
+		unlockBodyScrollForTutorial();
+		restoreFocusAfterTutorial();
+	}
+
+	function onTutorialKeydown(event: KeyboardEvent) {
+		if (!tutorialOpen) return;
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeTutorialSessionOnly();
+			return;
+		}
+
+		if (event.key !== 'Tab') return;
+		if (!tutorialDialogEl) return;
+
+		const focusables = Array.from(
+			tutorialDialogEl.querySelectorAll<HTMLElement>(
+				'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])'
+			)
+		).filter((el) => {
+			const style = window.getComputedStyle(el);
+			return style.display !== 'none' && style.visibility !== 'hidden';
+		});
+
+		if (focusables.length === 0) {
+			event.preventDefault();
+			tutorialDialogEl.focus();
+			return;
+		}
+
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		const active = document.activeElement as HTMLElement | null;
+
+		if (event.shiftKey && active === first) {
+			event.preventDefault();
+			last.focus();
+			return;
+		}
+		if (!event.shiftKey && active === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
+
+	async function openTutorial() {
+		if (browser) tutorialLastActiveEl = document.activeElement as HTMLElement | null;
+		lockBodyScrollForTutorial();
+		tutorialOpen = true;
+		await tick();
+		tutorialDialogEl?.focus();
+	}
+
+	function closeTutorial() {
+		tutorialOpen = false;
+		cleanupTutorialUi();
+		setTutorialDismissed(!!tutorialDontAutoShow);
+		tutorialDismissedAt = readTutorialDismissedAt();
+	}
+
+	function closeTutorialSessionOnly() {
+		tutorialOpen = false;
+		cleanupTutorialUi();
 	}
 
 	function pauseTimer() {
@@ -438,6 +549,18 @@
 		activeCellIndex = i;
 	}
 
+	async function focusRuleById(ruleId: string | null, opts: { openAllRules?: boolean } = {}) {
+		hoveredRuleId = ruleId;
+		if (!ruleId) return;
+
+		if (opts.openAllRules && allRulesDetailsEl) {
+			allRulesDetailsEl.open = true;
+			allRulesOpen = true;
+			await tick();
+			ruleCardEls[ruleId]?.scrollIntoView({ block: 'nearest' });
+		}
+	}
+
 	function buildHintExplain(h: HintResult | null): string | null {
 		if (!h) return null;
 
@@ -448,19 +571,26 @@
 		const mv = h.move ?? null;
 		if (!mv) return null;
 
-		const ruleId = colorRuleMap[grid[mv.cell]] ?? null;
+		const ruleId = h.reason?.ruleId ?? (colorRuleMap[grid[mv.cell]] ?? null);
 		const rule = ruleId ? allRules.find((r) => r.id === ruleId) ?? null : null;
 
+		const relatedFrom = h.reason?.ruleId ? '（引擎解释）' : '（由颜色推断）';
 		const related =
 			rule && ruleId
-				? `相关规则：${rule.name}（由颜色决定）。${rule.description}`
-				: '相关规则：未知（未能从颜色映射到规则）。';
+				? `相关规则：${rule.name}${relatedFrom}。${rule.description}`
+				: '相关规则：未知（未能映射到规则）。';
 
-		const safety = mv.forced
-			? '解释：这是安全一步（引擎证明另一种选择会导致矛盾/无解）。'
-			: '解释：这是建议方向（不一定唯一，但通常能推进推理）。';
+		const kind = h.reason?.kind ?? null;
+		const kindExplain =
+			kind === 'propagate'
+				? '解释：这是由规则传播直接推出的强制结论。'
+				: kind === 'contradiction'
+					? '解释：这是通过反证推出的强制结论（另一种选择会导致矛盾/无解）。'
+					: kind === 'repair'
+						? '解释：当前状态无解，这是用于“修复回到可解状态”的建议。'
+						: '解释：这是建议方向（不保证唯一，但通常能推进推理）。';
 
-		return `${related}\n${safety}`;
+		return `${related}\n${kindExplain}`;
 	}
 
 	function toggle(i: number) {
@@ -538,6 +668,16 @@
 		try {
 			const res = engine.hint_next(checkedMask >>> 0, new Uint8Array(grid));
 			hint = res;
+			if (Array.isArray(res.reason?.affectedCells)) {
+				const raw = res.reason?.affectedCells ?? [];
+				hintExplainCells = raw
+					.filter((x) => typeof x === 'number' && x >= 0 && x < 25)
+					.filter((x, idx, arr) => arr.indexOf(x) === idx);
+			} else if (res.move) {
+				hintExplainCells = [res.move.cell];
+			} else {
+				hintExplainCells = [];
+			}
 			hintCount += 1;
 			persistProgress();
 			const mv = res.move ?? null;
@@ -545,6 +685,7 @@
 				hintIndex = mv.cell;
 				hintAction = mv.action;
 				focusRuleByIndex(mv.cell);
+				await focusRuleById(res.reason?.ruleId ?? (colorRuleMap[grid[mv.cell]] ?? null), { openAllRules: true });
 			} else {
 				hintIndex = null;
 				hintAction = null;
@@ -817,6 +958,15 @@
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 
+		tutorialDismissedAt = readTutorialDismissedAt();
+		tutorialDontAutoShow = !shouldAutoShowTutorial(tutorialDismissedAt);
+		// 首次进入自动弹出（不阻塞引擎加载）
+		if (browser && shouldAutoShowTutorial(tutorialDismissedAt)) {
+			setTimeout(() => {
+				void openTutorial();
+			}, 80);
+		}
+
 		clockTick = Date.now();
 		const clock = setInterval(() => {
 			clockTick = Date.now();
@@ -907,6 +1057,7 @@
 			    <p class="subtitle">一个轻量逻辑游戏，灵感来源QQ群</p>
             </div>
 			<div class="header-actions">
+				<button class="btn" type="button" on:click={openTutorial} title="新手引导（可重复打开）">引导</button>
 				<a class="btn" href="/daily" title="每日题日历">日历</a>
 				<a class="btn" href="/stats" title="统计与成就">统计</a>
 				<a class="btn" href="/editor" title="关卡编辑器">编辑器</a>
@@ -986,6 +1137,76 @@
 					<div class="toast" transition:slide={{ axis: 'y' }}>{shareToast}</div>
 				{/if}
 
+				{#if tutorialOpen}
+					<div class="modal-layer" transition:fade={{ duration: 140 }}>
+						<button
+							class="modal-backdrop"
+							type="button"
+							aria-label="关闭新手引导"
+							on:click={closeTutorialSessionOnly}
+						></button>
+						<div
+							class="modal"
+							role="dialog"
+							aria-modal="true"
+							aria-label="新手引导"
+							tabindex="-1"
+							bind:this={tutorialDialogEl}
+							on:keydown={onTutorialKeydown}
+						>
+							<div class="modal-title">新手引导</div>
+							<div class="modal-sub">快速掌握：勾选、提示、撤销、标记、日历与编辑器</div>
+
+							<div class="modal-body">
+								<div class="tips">
+									<div class="tip">
+										<div class="tip-k">目标</div>
+										<div class="tip-v">满足颜色规则，并形成任意一条 5 连线（Bingo）。</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">勾选</div>
+										<div class="tip-v">点击格子勾选/取消；黑格固定勾选不可点击。</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">撤销/重做</div>
+										<div class="tip-v">按钮或快捷键：Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z。</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">标记</div>
+										<div class="tip-v">右键/长按循环：无 → 排除(⊘) → 问号(?)；键盘可用 M。</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">提示</div>
+										<div class="tip-v">
+											“安全提示”来自传播/反证；会高亮受影响格并定位对应规则。你可点击“应用”。
+										</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">键盘</div>
+										<div class="tip-v">方向键移动焦点；Space/Enter 操作当前格。</div>
+									</div>
+									<div class="tip">
+										<div class="tip-k">入口</div>
+										<div class="tip-v">日历：补做往期；统计：趋势与成就；编辑器：自制并分享关卡。</div>
+									</div>
+								</div>
+
+								<label class="checkbox">
+									<input type="checkbox" bind:checked={tutorialDontAutoShow} />
+									<span>以后不再自动弹出（仍可点右上角“引导”再次打开）</span>
+								</label>
+							</div>
+
+							<div class="modal-actions">
+								<button class="btn btn-primary" type="button" on:click={closeTutorial}>开始游戏</button>
+								<button class="btn btn-ghost" type="button" on:click={closeTutorialSessionOnly}>
+									仅关闭
+								</button>
+							</div>
+						</div>
+					</div>
+				{/if}
+
 				{#if shareManualVisible && shareUrlForManualCopy}
 					<div class="share-manual" transition:slide>
 						<input class="input" readonly value={shareUrlForManualCopy} on:focus={selectAll} on:click={selectAll} />
@@ -1006,6 +1227,7 @@
 						checkedMask={checkedMask}
 						marks={marks}
 						colorBlindMode={$colorBlindEnabled}
+						highlightCells={hintExplainCells}
 						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
 						hintIndex={hintIndex}
 						hintAction={hintAction}
@@ -1202,6 +1424,7 @@
 
 					<details
 						class="all-rules-details"
+						bind:this={allRulesDetailsEl}
 						on:toggle={(e) => (allRulesOpen = (e.currentTarget as HTMLDetailsElement).open)}
 					>
 						<summary>
@@ -1209,12 +1432,14 @@
 						</summary>
 						<div class="rules-grid">
 							{#each allRules as r}
-								<RuleCard
-									rule={r}
-									color={ruleColorCss(r.id)}
-									highlighted={hoveredRuleId === r.id}
-									highlightTone="soft"
-								/>
+								<div class="rule-item" use:ruleRef={r.id}>
+									<RuleCard
+										rule={r}
+										color={ruleColorCss(r.id)}
+										highlighted={hoveredRuleId === r.id}
+										highlightTone="soft"
+									/>
+								</div>
 							{/each}
 						</div>
 					</details>
@@ -1721,17 +1946,124 @@
     }
 
     /* Toast & Utils */
-    .toast {
-        background: var(--tooltip-bg);
-        border: 1px solid var(--tooltip-border);
-        color: var(--tooltip-text);
-        padding: 10px 12px;
-        border-radius: var(--radius-sm);
-        text-align: center;
-        font-size: 0.92rem;
-        margin-bottom: 12px;
-        box-shadow: var(--shadow-soft);
-    }
+	.toast {
+		background: var(--tooltip-bg);
+		border: 1px solid var(--tooltip-border);
+		color: var(--tooltip-text);
+		padding: 10px 12px;
+		border-radius: var(--radius-sm);
+		text-align: center;
+		font-size: 0.92rem;
+		margin-bottom: 12px;
+		box-shadow: var(--shadow-soft);
+	}
+
+	.modal-layer {
+		position: fixed;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		padding: 18px;
+		z-index: 9999;
+	}
+
+	.modal-backdrop {
+		position: absolute;
+		inset: 0;
+		background: color-mix(in srgb, #000 55%, transparent);
+		border: 0;
+		padding: 0;
+		margin: 0;
+		appearance: none;
+		cursor: pointer;
+	}
+
+	.modal {
+		position: relative;
+		width: min(760px, 100%);
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-soft);
+		padding: 16px 16px;
+	}
+
+	.modal-title {
+		font-weight: 950;
+		font-size: 1.05rem;
+		letter-spacing: -0.02em;
+		margin-bottom: 4px;
+	}
+
+	.modal-sub {
+		color: var(--muted);
+		font-size: 0.9rem;
+		margin-bottom: 12px;
+	}
+
+	.modal-body {
+		background: var(--bg-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		padding: 12px 12px;
+	}
+
+	.tips {
+		display: grid;
+		gap: 10px;
+	}
+
+	.tip {
+		display: grid;
+		gap: 4px;
+		padding: 10px 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--panel-2);
+	}
+
+	.tip-k {
+		font-weight: 900;
+		font-size: 0.85rem;
+		color: var(--text);
+	}
+
+	.tip-v {
+		color: var(--muted);
+		font-size: 0.86rem;
+		line-height: 1.45;
+	}
+
+	.checkbox {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 12px;
+		color: var(--muted);
+		font-size: 0.9rem;
+	}
+
+	.modal-actions {
+		display: flex;
+		gap: 10px;
+		justify-content: flex-end;
+		margin-top: 12px;
+	}
+
+	@media (max-width: 720px) {
+		.modal {
+			padding: 14px 14px;
+		}
+		.modal-body {
+			padding: 10px 10px;
+		}
+		.modal-actions {
+			justify-content: stretch;
+		}
+		.modal-actions > :global(.btn) {
+			flex: 1;
+		}
+	}
 
     .share-manual {
         margin-bottom: 12px;
