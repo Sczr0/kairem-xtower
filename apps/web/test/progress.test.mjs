@@ -10,19 +10,18 @@ test('makePuzzleKey: daily/seed/custom', () => {
 });
 
 test('history: push/undo/redo basic', () => {
-	let h = createHistory(0);
-	h = historyPush(h, 1);
-	h = historyPush(h, 3);
-	assert.equal(h.present, 3);
-	assert.deepEqual(h.undo, [0, 1]);
+	let h = createHistory(0n);
+	h = historyPush(h, 1n);
+	h = historyPush(h, 3n);
+	assert.equal(h.present, 3n);
+	assert.deepEqual(h.undo, [0n, 1n]);
 	assert.deepEqual(h.redo, []);
 
 	h = historyUndo(h);
-	assert.equal(h.present, 1);
-	assert.deepEqual(h.redo, [3]);
+	assert.equal(h.present, 1n);
+	assert.deepEqual(h.redo, [3n]);
 
 	h = historyRedo(h);
-	assert.equal(h.present, 3);
-	assert.deepEqual(h.undo, [0, 1]);
+	assert.equal(h.present, 3n);
+	assert.deepEqual(h.undo, [0n, 1n]);
 });
-

@@ -3,10 +3,11 @@
 <script lang="ts">
 	import { colorToCss, Color, type ColorId } from '$lib/colors';
 
-	const indices = Array.from({ length: 25 }, (_, i) => i);
+	$: indices = Array.from({ length: grid.length }, (_, i) => i);
+	$: size = Math.sqrt(grid.length);
 
 	export let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
-	export let checkedMask = 0;
+	export let checkedMask: bigint | number = 0n;
 	export let marks: number[] = Array.from({ length: 25 }, () => 0);
 	// 色盲模式：叠加字母/纹理提示（仅 UI，默认关闭）
 	export let colorBlindMode = false;
@@ -28,12 +29,12 @@
 
 	// 注意：不要把 checkedMask 依赖藏在函数闭包里，否则 Svelte 可能不会在 mask 更新时重算模板。
 	// 这里用响应式语句显式建立依赖关系，保证勾选样式能即时更新。
-	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
+	$: checkedFlags = indices.map((i) => (BigInt(checkedMask) & (1n << BigInt(i))) !== 0n);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
 	$: explainFlags = indices.map((i) => (highlightCells ?? []).includes(i));
 	$: explainSecondaryFlags = indices.map((i) => (highlightCellsSecondary ?? []).includes(i));
 
-	const cellEls: (HTMLButtonElement | null)[] = Array.from({ length: 25 }, () => null);
+	$: cellEls = Array.from({ length: grid.length }, () => null) as (HTMLButtonElement | null)[];
 
 	function cellRef(node: HTMLButtonElement, i: number) {
 		cellEls[i] = node;
@@ -55,12 +56,12 @@
 	}
 
 	function stepFocus(from: number, dx: number, dy: number) {
-		const x = from % 5;
-		const y = Math.floor(from / 5);
+		const x = from % size;
+		const y = Math.floor(from / size);
 		let nx = x + dx;
 		let ny = y + dy;
-		while (nx >= 0 && nx < 5 && ny >= 0 && ny < 5) {
-			const next = ny * 5 + nx;
+		while (nx >= 0 && nx < size && ny >= 0 && ny < size) {
+			const next = ny * size + nx;
 			if (!isDisabled(next)) {
 				focusCell(next);
 				return;
@@ -97,8 +98,8 @@
 	}
 
 	function cellAriaLabel(i: number): string {
-		const row = Math.floor(i / 5) + 1;
-		const col = (i % 5) + 1;
+		const row = Math.floor(i / size) + 1;
+		const col = (i % size) + 1;
 		const checked = checkedFlags[i] ? '已勾选' : '未勾选';
 		const mark = marks[i] === 1 ? '标记排除' : marks[i] === 2 ? '标记问号' : '无标记';
 		const color = colorBlindLabel(grid[i]);
@@ -216,7 +217,7 @@
 	}
 </script>
 
-<div class="matrix" role="grid" aria-label="5x5 矩阵">
+<div class="matrix" role="grid" aria-label="{size}x{size} 矩阵" style="grid-template-columns: repeat({size}, 1fr);">
 	{#each indices as i}
 		<div class="cell-wrapper">
 			<button
@@ -272,7 +273,7 @@
 <style>
 	.matrix {
 		display: grid;
-		grid-template-columns: repeat(5, 100px);
+		grid-template-columns: repeat(5, 100px); /* Fallback */
 		gap: 10px;
 		justify-content: start;
 		background: transparent;
@@ -287,7 +288,7 @@
 
 	@media (max-width: 720px) {
 		.matrix {
-			grid-template-columns: repeat(5, 60px);
+			grid-template-columns: repeat(5, 60px); /* Fallback */
 			gap: 6px;
 			padding: 0;
 		}

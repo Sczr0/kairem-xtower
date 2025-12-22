@@ -10,19 +10,23 @@ export const GRID_SIZE = 5;
 export const CELL_COUNT = GRID_SIZE * GRID_SIZE;
 
 /**
- * 将 25 个 0..15 的值打包为 nibble（低 4bit / 高 4bit），并在首字节写入版本号。
+ * 将 0..15 的值打包为 nibble（低 4bit / 高 4bit），并在首字节写入版本号。
  * @param {number[]} grid
  * @returns {Uint8Array}
  */
 function packLevelBytes(grid) {
-	if (!Array.isArray(grid) || grid.length !== CELL_COUNT) {
-		throw new Error(`grid 必须是长度为 ${CELL_COUNT} 的数组`);
+	if (!Array.isArray(grid)) {
+		throw new Error(`grid 必须是数组`);
+	}
+	const cellCount = grid.length;
+	if (cellCount !== CELL_COUNT) {
+		throw new Error(`grid 长度必须为 ${CELL_COUNT}（当前：${cellCount}）`);
 	}
 
-	const bytes = new Uint8Array(1 + Math.ceil(CELL_COUNT / 2));
+	const bytes = new Uint8Array(1 + Math.ceil(cellCount / 2));
 	bytes[0] = LEVEL_VERSION;
 
-	for (let i = 0; i < CELL_COUNT; i++) {
+	for (let i = 0; i < cellCount; i++) {
 		const v = grid[i];
 		if (!Number.isInteger(v) || v < 0 || v > 15) {
 			throw new Error(`grid[${i}] 非法：${String(v)}（要求 0..15 整数）`);
@@ -40,7 +44,7 @@ function packLevelBytes(grid) {
  * @returns {{ version: number, grid: number[] }}
  */
 function unpackLevelBytes(bytes) {
-	if (!(bytes instanceof Uint8Array) || bytes.length < 2) {
+	if (!(bytes instanceof Uint8Array) || bytes.length < 1) {
 		throw new Error('bytes 非法');
 	}
 
@@ -49,11 +53,19 @@ function unpackLevelBytes(bytes) {
 		throw new Error(`不支持的关卡版本：${version}`);
 	}
 
-	const grid = new Array(CELL_COUNT).fill(0);
-	for (let i = 0; i < CELL_COUNT; i++) {
+	const expectedLen = 1 + Math.ceil(CELL_COUNT / 2);
+	if (bytes.length !== expectedLen) {
+		throw new Error(`bytes 长度非法：${bytes.length}（期望：${expectedLen}）`);
+	}
+
+	const cellCount = CELL_COUNT;
+	const grid = [];
+	for (let i = 0; i < cellCount; i++) {
 		const bi = 1 + (i >> 1);
-		const b = bytes[bi] ?? 0;
-		grid[i] = (i & 1) === 0 ? b & 0xf : (b >> 4) & 0xf;
+		if (bi >= bytes.length) throw new Error('bytes 长度不足');
+		const b = bytes[bi];
+		const v = (i & 1) === 0 ? b & 0xf : (b >> 4) & 0xf;
+		grid.push(v);
 	}
 
 	return { version, grid };
@@ -105,11 +117,11 @@ function base64UrlToBytes(s) {
 
 /**
  * 编码关卡为短字符串（适合放在 `?level=`）。
- * @param {number[]} gridFlat25
+ * @param {number[]} gridFlat
  * @returns {string}
  */
-export function encodeLevel(gridFlat25) {
-	return bytesToBase64Url(packLevelBytes(gridFlat25));
+export function encodeLevel(gridFlat) {
+	return bytesToBase64Url(packLevelBytes(gridFlat));
 }
 
 /**
@@ -122,15 +134,15 @@ export function decodeLevel(code) {
 }
 
 /**
- * 生成“关卡 JSON”导出对象：`{ version: 1, grid: number[25] }`
- * @param {number[]} gridFlat25
+ * 生成“关卡 JSON”导出对象：`{ version: 1, grid: number[] }`
+ * @param {number[]} gridFlat
  */
-export function levelToJson(gridFlat25) {
-	return { version: LEVEL_VERSION, grid: [...gridFlat25] };
+export function levelToJson(gridFlat) {
+	return { version: LEVEL_VERSION, grid: [...gridFlat] };
 }
 
 /**
- * 将导入 JSON（支持 `number[25]` 或 `number[5][5]`）规范化为 `number[25]`。
+ * 将导入 JSON（支持 `number[]` 或 `number[][]`）规范化为 `number[]`。
  * @param {unknown} value
  * @returns {number[]}
  */
@@ -146,17 +158,21 @@ export function normalizeLevelJson(value) {
 	if (!grid) throw new Error('缺少 grid 字段');
 
 	// flat
-	if (Array.isArray(grid) && grid.length === CELL_COUNT && grid.every((x) => Number.isInteger(x))) {
-		return /** @type {number[]} */ (grid);
+	if (Array.isArray(grid) && grid.every((x) => Number.isInteger(x))) {
+		const size = Math.sqrt(grid.length);
+		if (Number.isInteger(size)) {
+			return /** @type {number[]} */ (grid);
+		}
 	}
 
-	// 5x5
-	if (Array.isArray(grid) && grid.length === GRID_SIZE) {
+	// 2D
+	if (Array.isArray(grid) && grid.length > 0 && Array.isArray(grid[0])) {
+		const size = grid.length;
 		const flat = [];
-		for (let r = 0; r < GRID_SIZE; r++) {
+		for (let r = 0; r < size; r++) {
 			const row = grid[r];
-			if (!Array.isArray(row) || row.length !== GRID_SIZE) throw new Error('grid 必须是 5x5');
-			for (let c = 0; c < GRID_SIZE; c++) {
+			if (!Array.isArray(row) || row.length !== size) throw new Error('grid 必须是正方形');
+			for (let c = 0; c < size; c++) {
 				const v = row[c];
 				if (!Number.isInteger(v)) throw new Error('grid 必须全部为整数');
 				flat.push(v);
@@ -165,6 +181,5 @@ export function normalizeLevelJson(value) {
 		return flat;
 	}
 
-	throw new Error('grid 必须是 number[25] 或 number[5][5]');
+	throw new Error('grid 格式非法');
 }
-

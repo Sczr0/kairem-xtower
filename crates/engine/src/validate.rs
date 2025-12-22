@@ -2,14 +2,11 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::colors::Color;
-use crate::masks::{
-    cell_bit, cell_index, Mask, CELL_COUNT, COL_MASKS, DIAG_COUNT, DIAG_DOWN_MASKS, DIAG_UP_MASKS,
-    GRID_SIZE, LINE_MASKS, NEIGHBORS_4, NEIGHBORS_8, ROW_MASKS,
-};
+use crate::masks::{cell_bit, cell_index, BoardMasks, Mask};
 
 #[derive(Debug, Error)]
 pub enum ValidateError {
-    #[error("color_grid 长度必须为 25，得到：{0}")]
+    #[error("color_grid 长度非法，得到：{0}")]
     BadGridLength(usize),
     #[error("color_grid 含非法颜色编码：index={index}, value={value}")]
     BadColor { index: usize, value: u8 },
@@ -19,7 +16,7 @@ pub enum ValidateError {
 pub struct ValidateResult {
     pub is_bingo: bool,
     pub is_valid: bool,
-    /// 每个格子的规则是否通过（长度 25，row-major）。
+    /// 每个格子的规则是否通过（row-major）。
     pub cell_ok: Vec<bool>,
     /// 每个格子的错误信息（若通过则为 None）。
     pub cell_messages: Vec<Option<String>>,
@@ -29,37 +26,42 @@ pub fn validate_state(
     checked_mask: Mask,
     color_grid: &[u8],
 ) -> Result<ValidateResult, ValidateError> {
-    if color_grid.len() != CELL_COUNT {
-        return Err(ValidateError::BadGridLength(color_grid.len()));
+    let cell_count = color_grid.len();
+    let size = (cell_count as f64).sqrt() as usize;
+    if size * size != cell_count {
+        return Err(ValidateError::BadGridLength(cell_count));
     }
 
-    let mut colors = [Color::White; CELL_COUNT];
+    let bm = BoardMasks::new(size);
+
+    let mut colors = Vec::with_capacity(cell_count);
     for (i, &v) in color_grid.iter().enumerate() {
-        colors[i] = Color::from_u8(v).ok_or(ValidateError::BadColor { index: i, value: v })?;
+        colors.push(Color::from_u8(v).ok_or(ValidateError::BadColor { index: i, value: v })?);
     }
 
-    let mut row_counts = [0u8; GRID_SIZE];
-    let mut col_counts = [0u8; GRID_SIZE];
-    for r in 0..GRID_SIZE {
-        row_counts[r] = (checked_mask & ROW_MASKS[r]).count_ones() as u8;
+    let mut row_counts = vec![0u8; size];
+    let mut col_counts = vec![0u8; size];
+    for r in 0..size {
+        row_counts[r] = (checked_mask & bm.row_masks[r]).count_ones() as u8;
     }
-    for c in 0..GRID_SIZE {
-        col_counts[c] = (checked_mask & COL_MASKS[c]).count_ones() as u8;
-    }
-
-    let mut diag_down_counts = [0u8; DIAG_COUNT];
-    let mut diag_up_counts = [0u8; DIAG_COUNT];
-    for d in 0..DIAG_COUNT {
-        diag_down_counts[d] = (checked_mask & DIAG_DOWN_MASKS[d]).count_ones() as u8;
-        diag_up_counts[d] = (checked_mask & DIAG_UP_MASKS[d]).count_ones() as u8;
+    for c in 0..size {
+        col_counts[c] = (checked_mask & bm.col_masks[c]).count_ones() as u8;
     }
 
-    let mut cell_ok = vec![true; CELL_COUNT];
-    let mut cell_messages = vec![None; CELL_COUNT];
+    let diag_count = bm.diag_down_masks.len();
+    let mut diag_down_counts = vec![0u8; diag_count];
+    let mut diag_up_counts = vec![0u8; diag_count];
+    for d in 0..diag_count {
+        diag_down_counts[d] = (checked_mask & bm.diag_down_masks[d]).count_ones() as u8;
+        diag_up_counts[d] = (checked_mask & bm.diag_up_masks[d]).count_ones() as u8;
+    }
 
-    for x in 0..GRID_SIZE {
-        for y in 0..GRID_SIZE {
-            let i = cell_index(x, y);
+    let mut cell_ok = vec![true; cell_count];
+    let mut cell_messages = vec![None; cell_count];
+
+    for x in 0..size {
+        for y in 0..size {
+            let i = cell_index(x, y, size);
             let (ok, msg) = match colors[i] {
                 Color::Black => {
                     let ok = (checked_mask & cell_bit(i)) != 0;
@@ -74,7 +76,7 @@ pub fn validate_state(
                 }
                 Color::White => (true, None),
                 Color::Red => {
-                    let count = (checked_mask & NEIGHBORS_8[i]).count_ones();
+                    let count = (checked_mask & bm.neighbors_8[i]).count_ones();
                     let ok = count >= 1;
                     (
                         ok,
@@ -86,7 +88,7 @@ pub fn validate_state(
                     )
                 }
                 Color::Blue => {
-                    let count = (checked_mask & NEIGHBORS_8[i]).count_ones();
+                    let count = (checked_mask & bm.neighbors_8[i]).count_ones();
                     let ok = count <= 2;
                     (
                         ok,
@@ -111,7 +113,7 @@ pub fn validate_state(
                     )
                 }
                 Color::Yellow => {
-                    let down_id = x + (GRID_SIZE - 1) - y;
+                    let down_id = x + (size - 1) - y;
                     let up_id = x + y;
                     let d = diag_down_counts[down_id];
                     let u = diag_up_counts[up_id];
@@ -126,7 +128,7 @@ pub fn validate_state(
                     )
                 }
                 Color::Purple => {
-                    let count = (checked_mask & NEIGHBORS_8[i]).count_ones();
+                    let count = (checked_mask & bm.neighbors_8[i]).count_ones();
                     let ok = count % 2 == 1;
                     (
                         ok,
@@ -138,7 +140,7 @@ pub fn validate_state(
                     )
                 }
                 Color::Orange => {
-                    let count = (checked_mask & NEIGHBORS_8[i]).count_ones();
+                    let count = (checked_mask & bm.neighbors_8[i]).count_ones();
                     let ok = count % 2 == 0;
                     (
                         ok,
@@ -153,7 +155,7 @@ pub fn validate_state(
                     if (checked_mask & cell_bit(i)) == 0 {
                         (true, None)
                     } else {
-                        let count = (checked_mask & NEIGHBORS_4[i]).count_ones();
+                        let count = (checked_mask & bm.neighbors_4[i]).count_ones();
                         let ok = count >= 1;
                         (
                             ok,
@@ -175,7 +177,7 @@ pub fn validate_state(
     }
 
     let is_valid = cell_ok.iter().all(|&x| x);
-    let is_bingo = LINE_MASKS.iter().any(|&line| (checked_mask & line) == line);
+    let is_bingo = bm.line_masks.iter().any(|&line| (checked_mask & line) == line);
 
     Ok(ValidateResult {
         is_bingo,

@@ -595,9 +595,9 @@ pub struct HintResult {
 }
 
 impl Solver {
-    pub fn new(colors: [Color; CELL_COUNT]) -> Self {
+    pub fn new(size: usize, colors: Vec<Color>) -> Self {
         Self {
-            rules: RuleSet::new(GRID_SIZE, colors.to_vec()),
+            rules: RuleSet::new(size, colors),
         }
     }
 
@@ -610,13 +610,14 @@ impl Solver {
     /// 备注：
     /// - 若 `checked_mask` 导致无解，会尝试给出“撤销某个勾选”的修复建议（非强制）。
     pub fn hint_next(&self, checked_mask: Mask) -> HintResult {
-        const VALID_CELL_MASK: u32 = (1u32 << CELL_COUNT) - 1;
-        let checked_mask = checked_mask & VALID_CELL_MASK;
+        let cell_count = self.rules.size * self.rules.size;
+        let valid_mask = if cell_count == 64 { u64::MAX } else { (1u64 << cell_count) - 1 };
+        let checked_mask = checked_mask & valid_mask;
 
         let Some((state, solution, hint_obs)) = self.solve_one_with_checked_mask_with_hint_trace(checked_mask) else {
             // 无解：尝试找一个“撤销某个勾选后可行”的建议（用于把用户从死路拉回来）。
             for &cell in &self.rules.decision_order {
-                let bit = 1u32 << cell;
+                let bit = 1u64 << cell;
                 if (checked_mask & bit) == 0 {
                     continue;
                 }
@@ -671,7 +672,7 @@ impl Solver {
 
         // 1) 传播阶段已经推出的强制“必须勾选”优先返回（最直观）。
         for &cell in &self.rules.decision_order {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) == 0 && state.is_checked_id(cell) {
                 let mut rule_id = None;
                 let mut secondary = vec![];
@@ -728,7 +729,7 @@ impl Solver {
             if !state.is_unchecked_id(cell) {
                 continue;
             }
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) == 0 {
                 continue;
             }
@@ -783,7 +784,7 @@ impl Solver {
         if let Some((cell, forced_checked, _obs, _scarcity)) =
             self.find_forced_by_contradiction(&state, &mut budget)
         {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
 
             // 同上：只返回“会改变当前状态”的一步，避免提示卡死。
             if forced_checked {
@@ -845,7 +846,7 @@ impl Solver {
 
         // 4) 没有强制结论：从一个可行解中抽取一步（建议）。
         for &cell in &self.rules.decision_order {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) == 0 && (solution & bit) != 0 {
                 let line = self.best_bingo_line_for_cell(solution, cell);
                 return HintResult {
@@ -905,7 +906,7 @@ impl Solver {
 
         // 将 checked_mask 视为“已确认勾选”，其余保持未知。
         for &cell in &self.rules.decision_order {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) != 0 {
                 if state.set_checked_id(cell).is_err() {
                     return None;
@@ -939,7 +940,7 @@ impl Solver {
 
         // 将 checked_mask 视为“已确认勾选”，其余保持未知。
         for &cell in &self.rules.decision_order {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) != 0 {
                 if !try_set_checked_id(&mut state, cell, AssignReason::Initial, &mut obs) {
                     return None;
@@ -988,7 +989,7 @@ impl Solver {
         for line in candidates {
             let mut score = 0i32;
             for &id in &line {
-                if (solution & (1u32 << id)) != 0 {
+                if (solution & (1u64 << id)) != 0 {
                     score += 1;
                 }
             }
@@ -1038,8 +1039,9 @@ impl Solver {
     /// - 黑格（Color::Black）依然强制勾选，与 `checked_mask` 无关；
     /// - 若初始赋值或传播阶段产生矛盾，直接返回空解集。
     pub fn solve_masks_limit_with_checked_mask(&self, checked_mask: Mask, limit: usize) -> Vec<Mask> {
-        const VALID_CELL_MASK: u32 = (1u32 << CELL_COUNT) - 1;
-        let checked_mask = checked_mask & VALID_CELL_MASK;
+        let cell_count = self.rules.size * self.rules.size;
+        let valid_mask = if cell_count == 64 { u64::MAX } else { (1u64 << cell_count) - 1 };
+        let checked_mask = checked_mask & valid_mask;
 
         let mut state = SolverState::new(self.rules.size);
         for &id in &self.rules.black_cells {
@@ -1049,7 +1051,7 @@ impl Solver {
 
         // 将 checked_mask 视为“已确认勾选”，其余保持未知
         for &cell in &self.rules.decision_order {
-            let bit = 1u32 << cell;
+            let bit = 1u64 << cell;
             if (checked_mask & bit) != 0 {
                 if state.set_checked_id(cell).is_err() {
                     return Vec::new();
@@ -1337,7 +1339,7 @@ impl Solver {
 
         if state.is_fully_decided() {
             obs.on_solution();
-            out.push(state.to_row_major_u32_mask());
+            out.push(state.to_row_major_mask());
             return;
         }
 
@@ -2098,18 +2100,18 @@ mod tests {
         let mut out = [Color::White; CELL_COUNT];
         for x in 0..GRID_SIZE {
             for y in 0..GRID_SIZE {
-                out[cell_index(x, y)] = rows[x][y];
+                out[cell_index(x, y, GRID_SIZE)] = rows[x][y];
             }
         }
         out
     }
 
     fn brute_force_solution_set(colors: [Color; CELL_COUNT]) -> BTreeSet<Mask> {
-        let mut black_mask = 0u32;
+        let mut black_mask: Mask = 0;
         let mut vars = Vec::new();
         for i in 0..CELL_COUNT {
             if colors[i] == Color::Black {
-                black_mask |= 1u32 << i;
+                black_mask |= 1u64 << i;
             } else {
                 vars.push(i);
             }
@@ -2123,7 +2125,7 @@ mod tests {
             let mut mask = black_mask;
             for (j, &i) in vars.iter().enumerate() {
                 if (combo & (1u64 << j)) != 0 {
-                    mask |= 1u32 << i;
+                    mask |= 1u64 << i;
                 }
             }
 
@@ -2176,7 +2178,7 @@ mod tests {
         ]);
 
         let expected = brute_force_solution_set(colors);
-        let got: BTreeSet<Mask> = Solver::new(colors)
+        let got: BTreeSet<Mask> = Solver::new(GRID_SIZE, colors.to_vec())
             .solve_masks_limit(0)
             .into_iter()
             .collect();
@@ -2186,7 +2188,7 @@ mod tests {
 
     #[test]
     fn hint_does_not_claim_no_solution_for_generated_puzzle() {
-        let grid = crate::generate::generate_puzzle(123).expect("generate ok");
+        let grid = crate::generate::generate_puzzle(123, GRID_SIZE).expect("generate ok");
         let flat: Vec<u8> = grid.into_iter().flatten().collect();
 
         let mut colors = [Color::White; CELL_COUNT];
@@ -2194,8 +2196,8 @@ mod tests {
             colors[i] = Color::from_u8(v).expect("valid color");
         }
 
-        let solver = Solver::new(colors);
-        let hint = solver.hint_next(0u32);
+        let solver = Solver::new(GRID_SIZE, colors.to_vec());
+        let hint = solver.hint_next(0u64);
         assert!(!matches!(hint.status, HintStatus::NoSolution));
     }
 
@@ -2203,7 +2205,7 @@ mod tests {
     fn hint_uncheck_move_is_actionable() {
         // 该测试针对“提示要求 uncheck 但目标格并未被勾选，导致提示卡死”的问题。
         // 约定：如果返回 move.action == Uncheck，则该格必须在 checked_mask 中为 1（用户当前确实勾选了它）。
-        let grid = crate::generate::generate_puzzle(123).expect("generate ok");
+        let grid = crate::generate::generate_puzzle(123, GRID_SIZE).expect("generate ok");
         let flat: Vec<u8> = grid.into_iter().flatten().collect();
 
         let mut colors = [Color::White; CELL_COUNT];
@@ -2211,14 +2213,14 @@ mod tests {
             colors[i] = Color::from_u8(v).expect("valid color");
         }
 
-        let mut black_mask = 0u32;
+        let mut black_mask: Mask = 0;
         for i in 0..CELL_COUNT {
             if colors[i] == Color::Black {
-                black_mask |= 1u32 << i;
+                black_mask |= 1u64 << i;
             }
         }
 
-        let solver = Solver::new(colors);
+        let solver = Solver::new(GRID_SIZE, colors.to_vec());
         let hint = solver.hint_next(black_mask);
         if let Some(mv) = hint.mv.clone() {
             // 约定：只要给出了可执行 move，就应给出结构化 reason（用于前端高质量解释）。
@@ -2231,7 +2233,7 @@ mod tests {
             }
             if matches!(mv.action, HintAction::Uncheck) {
                 assert_ne!(
-                    black_mask & (1u32 << mv.cell),
+                    black_mask & (1u64 << mv.cell),
                     0,
                     "hint asked to uncheck an unchecked cell: cell={}",
                     mv.cell
@@ -2247,8 +2249,8 @@ mod tests {
         // - 不会出现反证强制
         // 因此应回落到“从一个可行解抽取一步”的建议，并提供 bingo 的教学上下文。
         let colors = [Color::White; CELL_COUNT];
-        let solver = Solver::new(colors);
-        let hint = solver.hint_next(0u32);
+        let solver = Solver::new(GRID_SIZE, colors.to_vec());
+        let hint = solver.hint_next(0u64);
 
         assert!(matches!(hint.status, HintStatus::Suggested));
         let mv = hint.mv.expect("suggest should include a move");

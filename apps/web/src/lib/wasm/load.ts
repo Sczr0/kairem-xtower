@@ -63,13 +63,13 @@ export type SolutionCountResult = {
 
 export type Engine = {
 	date_to_seed_ymd(date: string): bigint;
-	generate_puzzle(seed: bigint): number[][];
-	validate_state(checked_mask: number, color_grid: Uint8Array): ValidateResult;
+	generate_puzzle(seed: bigint, size: number): number[][];
+	validate_state(checked_mask: bigint, color_grid: Uint8Array): ValidateResult;
 	difficulty_report(color_grid: Uint8Array): DifficultyReport;
-	hint_next(checked_mask: number, color_grid: Uint8Array): HintResult;
+	hint_next(checked_mask: bigint, color_grid: Uint8Array): HintResult;
 	solution_count(color_grid: Uint8Array, limit: number): SolutionCountResult;
 	solution_count_with_checked(
-		checked_mask: number,
+		checked_mask: bigint,
 		color_grid: Uint8Array,
 		limit: number
 	): SolutionCountResult;

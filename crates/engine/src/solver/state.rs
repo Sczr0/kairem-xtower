@@ -1,4 +1,4 @@
-/// 求解器状态（<=32x32）。
+/// 求解器状态（<=64x64）。
 ///
 /// 设计要点：
 /// - 每个格子是“勾选/不勾选/未知”三态；
@@ -12,12 +12,12 @@ pub struct SolverState {
     size: usize,
 
     // 行视图：pos_rows[row] 的第 col 位为 1，表示 (row,col) 勾选
-    pub(crate) pos_rows: Vec<u32>,
-    pub(crate) neg_rows: Vec<u32>,
+    pub(crate) pos_rows: Vec<u64>,
+    pub(crate) neg_rows: Vec<u64>,
 
     // 列视图：pos_cols[col] 的第 row 位为 1，表示 (row,col) 勾选
-    pub(crate) pos_cols: Vec<u32>,
-    pub(crate) neg_cols: Vec<u32>,
+    pub(crate) pos_cols: Vec<u64>,
+    pub(crate) neg_cols: Vec<u64>,
 
     // 计数缓存：用于快速得到 [min,max] 范围
     row_checked: Vec<u8>,
@@ -35,9 +35,9 @@ pub struct SolverState {
 
 impl SolverState {
     pub fn new(size: usize) -> Self {
-        assert!((1..=32).contains(&size), "size 必须在 1..=32，得到：{size}");
+        assert!((1..=64).contains(&size), "size 必须在 1..=64，得到：{size}");
 
-        let diag_count = size * 2 - 1;
+        let diag_count = if size > 0 { size * 2 - 1 } else { 0 };
         let mut diag_down_len = vec![0u8; diag_count];
         let mut diag_up_len = vec![0u8; diag_count];
 
@@ -76,11 +76,11 @@ impl SolverState {
     }
 
     #[inline]
-    fn valid_mask(&self) -> u32 {
-        if self.size == 32 {
-            u32::MAX
+    fn valid_mask(&self) -> u64 {
+        if self.size == 64 {
+            u64::MAX
         } else {
-            (1u32 << self.size) - 1
+            (1u64 << self.size) - 1
         }
     }
 
@@ -101,12 +101,12 @@ impl SolverState {
 
     #[inline]
     pub fn is_checked(&self, row: usize, col: usize) -> bool {
-        (self.pos_rows[row] & (1u32 << col)) != 0
+        (self.pos_rows[row] & (1u64 << col)) != 0
     }
 
     #[inline]
     pub fn is_unchecked(&self, row: usize, col: usize) -> bool {
-        (self.neg_rows[row] & (1u32 << col)) != 0
+        (self.neg_rows[row] & (1u64 << col)) != 0
     }
 
     #[inline]
@@ -138,7 +138,7 @@ impl SolverState {
     /// - Ok(false)：已是勾选（无变化）
     /// - Err(())：与“不勾选”矛盾
     pub fn set_checked(&mut self, row: usize, col: usize) -> Result<bool, ()> {
-        let bit = 1u32 << col;
+        let bit = 1u64 << col;
         if (self.neg_rows[row] & bit) != 0 {
             return Err(());
         }
@@ -147,7 +147,7 @@ impl SolverState {
         }
 
         self.pos_rows[row] |= bit;
-        self.pos_cols[col] |= 1u32 << row;
+        self.pos_cols[col] |= 1u64 << row;
 
         self.row_checked[row] += 1;
         self.col_checked[col] += 1;
@@ -165,7 +165,7 @@ impl SolverState {
     /// - Ok(false)：已是不勾选（无变化）
     /// - Err(())：与“勾选”矛盾
     pub fn set_unchecked(&mut self, row: usize, col: usize) -> Result<bool, ()> {
-        let bit = 1u32 << col;
+        let bit = 1u64 << col;
         if (self.pos_rows[row] & bit) != 0 {
             return Err(());
         }
@@ -174,7 +174,7 @@ impl SolverState {
         }
 
         self.neg_rows[row] |= bit;
-        self.neg_cols[col] |= 1u32 << row;
+        self.neg_cols[col] |= 1u64 << row;
 
         self.row_unchecked[row] += 1;
         self.col_unchecked[col] += 1;
@@ -232,13 +232,13 @@ impl SolverState {
 
     /// 返回某一行的“未知列位图”（第 col 位为 1 表示未知）。
     #[inline]
-    pub fn unknown_cols_mask_in_row(&self, row: usize) -> u32 {
+    pub fn unknown_cols_mask_in_row(&self, row: usize) -> u64 {
         (!(self.pos_rows[row] | self.neg_rows[row])) & self.valid_mask()
     }
 
     /// 返回某一列的“未知行位图”（第 row 位为 1 表示未知）。
     #[inline]
-    pub fn unknown_rows_mask_in_col(&self, col: usize) -> u32 {
+    pub fn unknown_rows_mask_in_col(&self, col: usize) -> u64 {
         (!(self.pos_cols[col] | self.neg_cols[col])) & self.valid_mask()
     }
 
@@ -272,20 +272,20 @@ impl SolverState {
         h
     }
 
-    /// 仅用于 5x5（或任意 size*size <= 32）将状态转为 row-major 的 u32 mask。
-    pub fn to_row_major_u32_mask(&self) -> u32 {
+    /// 仅用于 size*size <= 64 将状态转为 row-major 的 u64 mask。
+    pub fn to_row_major_mask(&self) -> u64 {
         assert!(
-            self.size * self.size <= 32,
-            "to_row_major_u32_mask 仅支持 size*size<=32"
+            self.size * self.size <= 64,
+            "to_row_major_mask 仅支持 size*size<=64"
         );
 
-        let mut out = 0u32;
+        let mut out = 0u64;
         for row in 0..self.size {
             let bits = self.pos_rows[row] & self.valid_mask();
             for col in 0..self.size {
-                if (bits & (1u32 << col)) != 0 {
+                if (bits & (1u64 << col)) != 0 {
                     let idx = row * self.size + col;
-                    out |= 1u32 << idx;
+                    out |= 1u64 << idx;
                 }
             }
         }

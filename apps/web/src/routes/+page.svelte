@@ -16,14 +16,13 @@
 		historyRedo,
 		historyUndo,
 		loadProgressEntry,
-		listProgressEntries,
-		makePuzzleKey,
-		normalizeHistory,
-		normalizeMaskU32,
-		upsertProgressEntry,
-		type HistoryState,
-		type ProgressEntry
-	} from '$lib/progress.js';
+ 		listProgressEntries,
+ 		makePuzzleKey,
+ 		normalizeHistory,
+ 		upsertProgressEntry,
+ 		type HistoryState,
+ 		type ProgressEntry
+ 	} from '$lib/progress.js';
 	import { createMarks, cycleMarkValue, normalizeMarks } from '$lib/marks.js';
 	import { Color, type ColorId, colorToCss } from '$lib/colors';
 	import {
@@ -33,6 +32,11 @@
 		type HintResult,
 		type ValidateResult
 	} from '$lib/wasm/load';
+	import {
+		generatePuzzleAsync,
+		getDifficultyReportAsync,
+		getSolutionCountAsync
+	} from '$lib/wasm/async';
 	import { browser, dev } from '$app/environment';
 	import { onMount, tick } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
@@ -50,6 +54,7 @@
 
 	let dateYmd = '';
 	let seed: bigint | null = null;
+	let gridSize = 5;
 
 	let shareToast = '';
 	let shareUrlForManualCopy = '';
@@ -64,7 +69,7 @@
 
 	let grid2d: number[][] = [];
 	let grid: ColorId[] = Array.from({ length: 25 }, () => Color.White);
-	let checkedMask = 0;
+	let checkedMask = 0n;
 	let marks: number[] = createMarks();
 	let levelCode: string | null = null;
 	let history: HistoryState = createHistory(0);
@@ -417,12 +422,12 @@
 		return g.flat().map((x) => x as ColorId);
 	}
 
-	function blackMaskFromGrid(flat: ColorId[]): number {
-		let m = 0;
+	function blackMaskFromGrid(flat: ColorId[]): bigint {
+		let m = 0n;
 		for (let i = 0; i < flat.length; i++) {
-			if (flat[i] === Color.Black) m |= 1 << i;
+			if (flat[i] === Color.Black) m |= 1n << BigInt(i);
 		}
-		return m >>> 0;
+		return m;
 	}
 
 	function safeCurrentPuzzleKey(): string | null {
@@ -451,13 +456,13 @@
 		progressEntries = listProgressEntries();
 	}
 
-	function applyBlackMaskToHistory(h: HistoryState, blackMask: number): HistoryState {
-		const apply = (m: number) => normalizeMaskU32((m | blackMask) >>> 0);
+	function applyBlackMaskToHistory(h: HistoryState, blackMask: bigint): HistoryState {
+		const apply = (m: bigint) => m | blackMask;
 		return normalizeHistory(
 			{
-				undo: (h.undo ?? []).map(apply),
-				redo: (h.redo ?? []).map(apply),
-				present: apply(h.present)
+				undo: (h.undo ?? []).map((m) => apply(BigInt(m))),
+				redo: (h.redo ?? []).map((m) => apply(BigInt(m))),
+				present: apply(BigInt(h.present))
 			},
 			HISTORY_LIMIT
 		);
@@ -487,7 +492,7 @@
 			dateYmd: kind === 'daily' ? dateYmd : undefined,
 			seed: seed ? seed.toString() : undefined,
 			levelCode: kind === 'custom' ? (levelCode ?? encodeLevel(grid)) : undefined,
-			checkedMask: checkedMask >>> 0,
+			checkedMask: checkedMask,
 			marks,
 			undo: history.undo,
 			redo: history.redo,
@@ -518,7 +523,7 @@
 				{
 					undo: saved.undo ?? [],
 					redo: saved.redo ?? [],
-					present: typeof saved.checkedMask === 'number' ? saved.checkedMask : blackMask
+					present: saved.checkedMask ?? blackMask
 				},
 				HISTORY_LIMIT
 			),
@@ -537,13 +542,13 @@
 
 	function refreshValidate() {
 		if (!engine) return;
-		validate = engine.validate_state(checkedMask >>> 0, new Uint8Array(grid));
+		validate = engine.validate_state(BigInt(checkedMask), new Uint8Array(grid));
 	}
 
-	function refreshDifficulty() {
+	async function refreshDifficulty() {
 		if (!engine) return;
 		try {
-			difficulty = engine.difficulty_report(new Uint8Array(grid));
+			difficulty = await getDifficultyReportAsync(new Uint8Array(grid));
 		} catch {
 			difficulty = null;
 		}
@@ -601,7 +606,7 @@
 
 	function toggle(i: number) {
 		if (grid[i] === Color.Black) return;
-		const next = (checkedMask ^ (1 << i)) >>> 0;
+		const next = BigInt(checkedMask) ^ (1n << BigInt(i));
 		history = historyPush({ undo: history.undo, redo: history.redo, present: checkedMask }, next);
 		checkedMask = history.present;
 		moveCount += 1;
@@ -672,13 +677,13 @@
 
 		hintLoading = true;
 		try {
-			const res = engine.hint_next(checkedMask >>> 0, new Uint8Array(grid));
+			const res = engine.hint_next(BigInt(checkedMask), new Uint8Array(grid));
 			hint = res;
 			hintExplainDetailsOpen = false;
 			if (Array.isArray(res.reason?.affectedCells)) {
 				const raw = res.reason?.affectedCells ?? [];
 				hintExplainCells = raw
-					.filter((x) => typeof x === 'number' && x >= 0 && x < 25)
+					.filter((x) => typeof x === 'number' && x >= 0 && x < grid.length)
 					.filter((x, idx, arr) => arr.indexOf(x) === idx);
 			} else if (res.move) {
 				hintExplainCells = [res.move.cell];
@@ -689,7 +694,7 @@
 			if (Array.isArray(res.reason?.secondaryCells)) {
 				const raw = res.reason?.secondaryCells ?? [];
 				hintExplainSecondaryCells = raw
-					.filter((x) => typeof x === 'number' && x >= 0 && x < 25)
+					.filter((x) => typeof x === 'number' && x >= 0 && x < grid.length)
 					.filter((x, idx, arr) => arr.indexOf(x) === idx);
 			} else {
 				hintExplainSecondaryCells = [];
@@ -718,7 +723,7 @@
 		const mv = hint?.move;
 		if (!mv) return;
 		const i = mv.cell;
-		const isChecked = ((checkedMask >>> 0) & (1 << i)) !== 0;
+		const isChecked = (BigInt(checkedMask) & (1n << BigInt(i))) !== 0n;
 
 		if (mv.action === 'check') {
 			if (isChecked) {
@@ -741,7 +746,7 @@
 		if (!engine) return;
 		seed = newSeed;
 		levelCode = null;
-		grid2d = engine.generate_puzzle(seed);
+		grid2d = await generatePuzzleAsync(seed, gridSize);
 		grid = flattenGrid2d(grid2d);
 		checkedMask = blackMaskFromGrid(grid);
 		marks = createMarks();
@@ -766,6 +771,7 @@
 		seed = null;
 		grid2d = [];
 		grid = [...flat];
+		gridSize = Math.sqrt(grid.length);
 		checkedMask = blackMaskFromGrid(grid);
 		marks = createMarks();
 		levelCode = opts.levelCode ?? null;
@@ -1248,7 +1254,7 @@
 						colorBlindMode={$colorBlindEnabled}
 						highlightCells={hintExplainCells}
 						highlightCellsSecondary={hintExplainDetailsOpen ? hintExplainSecondaryCells : []}
-						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
+						cellOk={validate?.cell_ok ?? Array(grid.length).fill(true)}
 						hintIndex={hintIndex}
 						hintAction={hintAction}
 						onToggle={toggle}
@@ -1276,7 +1282,7 @@
 						<summary>调试信息</summary>
 						<div class="debug-content">
 							<code>seed: {seed?.toString() ?? '—'}</code>
-							<code>mask: {checkedMask >>> 0}</code>
+							<code>mask: {checkedMask.toString()}</code>
 							<code>difficulty: {difficulty ? `${difficulty.difficulty_score} (nodes=${difficulty.stats.node_visits})` : 'n/a'}</code>
 						</div>
 					</details>
@@ -1312,7 +1318,7 @@
 							<div class="section-label">冲突原因</div>
 							<div class="cell-error-box">
 								<div class="cell-error-meta">
-									格子 ({Math.floor(activeCellIndex / 5) + 1},{(activeCellIndex % 5) + 1})
+									格子 ({Math.floor(activeCellIndex / gridSize) + 1},{(activeCellIndex % gridSize) + 1})
 								</div>
 								<div class="cell-error-text">{validate.cell_messages[activeCellIndex]}</div>
 							</div>
@@ -1483,7 +1489,7 @@
 									</span>
 									<span class="hint-op">
 										{hint.move.action === 'check' ? '勾选' : '取消勾选'} 格子
-										({Math.floor(hint.move.cell / 5) + 1},{(hint.move.cell % 5) + 1})
+										({Math.floor(hint.move.cell / gridSize) + 1},{(hint.move.cell % gridSize) + 1})
 									</span>
 								</div>
 							{/if}

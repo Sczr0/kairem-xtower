@@ -31,21 +31,26 @@ export function makePuzzleKey(kind, info) {
 }
 
 /**
- * @param {number} mask
+ * @param {bigint|number|string} mask
+ * @returns {bigint}
  */
-export function normalizeMaskU32(mask) {
-	// 确保落在 u32 范围内（并保持 JS number）
-	return (mask >>> 0) >>> 0;
+export function normalizeMask(mask) {
+	if (typeof mask === 'bigint') return mask;
+	try {
+		return BigInt(mask);
+	} catch {
+		return 0n;
+	}
 }
 
 /**
- * @param {{ undo?: number[], redo?: number[], present: number }} history
+ * @param {{ undo?: (bigint|number|string)[], redo?: (bigint|number|string)[], present: bigint|number|string }} history
  * @param {number} limit
  */
 export function normalizeHistory(history, limit = HISTORY_LIMIT) {
-	const undo = Array.isArray(history.undo) ? history.undo.map(normalizeMaskU32) : [];
-	const redo = Array.isArray(history.redo) ? history.redo.map(normalizeMaskU32) : [];
-	const present = normalizeMaskU32(history.present);
+	const undo = Array.isArray(history.undo) ? history.undo.map(normalizeMask) : [];
+	const redo = Array.isArray(history.redo) ? history.redo.map(normalizeMask) : [];
+	const present = normalizeMask(history.present);
 	return {
 		undo: undo.slice(Math.max(0, undo.length - limit)),
 		redo: redo.slice(Math.max(0, redo.length - limit)),
@@ -54,7 +59,7 @@ export function normalizeHistory(history, limit = HISTORY_LIMIT) {
 }
 
 /**
- * @param {number} initialMask
+ * @param {bigint|number|string} initialMask
  */
 export function createHistory(initialMask) {
 	return normalizeHistory({ undo: [], redo: [], present: initialMask });
@@ -62,12 +67,12 @@ export function createHistory(initialMask) {
 
 /**
  * 推入新状态：将 current 进 undo，清空 redo。
- * @param {{ undo: number[], redo: number[], present: number }} history
- * @param {number} nextMask
+ * @param {{ undo: bigint[], redo: bigint[], present: bigint }} history
+ * @param {bigint} nextMask
  */
 export function historyPush(history, nextMask) {
 	const h = normalizeHistory(history);
-	const next = normalizeMaskU32(nextMask);
+	const next = normalizeMask(nextMask);
 	if (h.present === next) return h;
 	const undo = [...h.undo, h.present];
 	return normalizeHistory({ undo, redo: [], present: next });
@@ -75,7 +80,7 @@ export function historyPush(history, nextMask) {
 
 /**
  * 撤销：present -> redo，undo.pop() -> present
- * @param {{ undo: number[], redo: number[], present: number }} history
+ * @param {{ undo: bigint[], redo: bigint[], present: bigint }} history
  */
 export function historyUndo(history) {
 	const h = normalizeHistory(history);
@@ -88,7 +93,7 @@ export function historyUndo(history) {
 
 /**
  * 重做：present -> undo，redo.pop() -> present
- * @param {{ undo: number[], redo: number[], present: number }} history
+ * @param {{ undo: bigint[], redo: bigint[], present: bigint }} history
  */
 export function historyRedo(history) {
 	const h = normalizeHistory(history);
@@ -165,7 +170,7 @@ export function upsertProgressEntry(entry) {
 	const normalizedHistory = normalizeHistory({
 		undo: entry.undo ?? [],
 		redo: entry.redo ?? [],
-		present: entry.checkedMask ?? 0
+		present: entry.checkedMask ?? 0n
 	});
 
 	store.entries[entry.key] = {
@@ -173,9 +178,9 @@ export function upsertProgressEntry(entry) {
 		...entry,
 		createdAt,
 		updatedAt,
-		checkedMask: normalizedHistory.present,
-		undo: normalizedHistory.undo,
-		redo: normalizedHistory.redo
+		checkedMask: normalizedHistory.present.toString(),
+		undo: normalizedHistory.undo.map((m) => m.toString()),
+		redo: normalizedHistory.redo.map((m) => m.toString())
 	};
 
 	// 裁剪历史条目数量：按 updatedAt 排序保留最近 N 条

@@ -62,12 +62,12 @@
 		input?.select();
 	}
 
-	function blackMaskFromGrid(flat: ColorId[]): number {
-		let m = 0;
+	function blackMaskFromGrid(flat: ColorId[]): bigint {
+		let m = 0n;
 		for (let i = 0; i < flat.length; i++) {
-			if (flat[i] === Color.Black) m |= 1 << i;
+			if (flat[i] === Color.Black) m |= 1n << BigInt(i);
 		}
-		return m >>> 0;
+		return m;
 	}
 
 	function setCell(i: number, color: ColorId) {

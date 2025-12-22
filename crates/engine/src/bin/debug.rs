@@ -34,13 +34,13 @@ fn main() {
     }
 
     let seed = seed.unwrap_or(0);
-    let grid = generate_puzzle_grid(seed).expect("生成题目失败");
+    let grid = generate_puzzle_grid(seed, 5).expect("生成题目失败");
 
     let flat: Vec<u8> = grid.iter().flat_map(|r| r.iter().copied()).collect();
-    let mut black_mask = 0u32;
+    let mut black_mask = 0u64;
     for (i, &c) in flat.iter().enumerate() {
         if c == Color::Black.to_u8() {
-            black_mask |= 1u32 << i;
+            black_mask |= 1u64 << i;
         }
     }
 

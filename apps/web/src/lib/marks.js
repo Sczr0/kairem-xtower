@@ -9,20 +9,22 @@ export const MARK_EXCLUDE = 1;
 export const MARK_QUESTION = 2;
 
 /**
+ * @param {number} length
  * @returns {number[]}
  */
-export function createMarks() {
-	return Array.from({ length: 25 }, () => MARK_NONE);
+export function createMarks(length = 25) {
+	return Array.from({ length }, () => MARK_NONE);
 }
 
 /**
  * @param {any} raw
+ * @param {number} length
  * @returns {number[]}
  */
-export function normalizeMarks(raw) {
-	if (!Array.isArray(raw)) return createMarks();
-	const out = createMarks();
-	for (let i = 0; i < 25; i++) {
+export function normalizeMarks(raw, length = 25) {
+	if (!Array.isArray(raw)) return createMarks(length);
+	const out = createMarks(length);
+	for (let i = 0; i < length; i++) {
 		const v = raw[i];
 		if (v === MARK_NONE || v === MARK_EXCLUDE || v === MARK_QUESTION) out[i] = v;
 	}

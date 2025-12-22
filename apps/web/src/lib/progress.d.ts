@@ -8,12 +8,12 @@ export type PuzzleKind = 'daily' | 'seed' | 'custom';
 export type PuzzleKeyInfo = { dateYmd?: string; seed?: string; levelCode?: string };
 
 export function makePuzzleKey(kind: PuzzleKind, info: PuzzleKeyInfo): string;
-export function normalizeMaskU32(mask: number): number;
+export function normalizeMask(mask: bigint | number | string): bigint;
 
-export type HistoryState = { undo: number[]; redo: number[]; present: number };
-export function normalizeHistory(history: { undo?: number[]; redo?: number[]; present: number }, limit?: number): HistoryState;
-export function createHistory(initialMask: number): HistoryState;
-export function historyPush(history: HistoryState, nextMask: number): HistoryState;
+export type HistoryState = { undo: bigint[]; redo: bigint[]; present: bigint };
+export function normalizeHistory(history: { undo?: (bigint | number | string)[]; redo?: (bigint | number | string)[]; present: bigint | number | string }, limit?: number): HistoryState;
+export function createHistory(initialMask: bigint | number | string): HistoryState;
+export function historyPush(history: HistoryState, nextMask: bigint | number | string): HistoryState;
 export function historyUndo(history: HistoryState): HistoryState;
 export function historyRedo(history: HistoryState): HistoryState;
 
@@ -23,10 +23,10 @@ export type ProgressEntry = {
 	dateYmd?: string;
 	seed?: string;
 	levelCode?: string;
-	checkedMask: number;
+	checkedMask: bigint | number | string;
 	marks?: number[];
-	undo: number[];
-	redo: number[];
+	undo: (bigint | number | string)[];
+	redo: (bigint | number | string)[];
 	moveCount?: number;
 	hintCount?: number;
 	timeMs?: number;

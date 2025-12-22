@@ -195,19 +195,21 @@ fn calculate_logic_chain_start_difficulty(first_trigger_counts: &std::collection
 }
 
 pub fn difficulty_report(color_grid: &[u8]) -> Result<DifficultyReport, DifficultyError> {
-    if color_grid.len() != CELL_COUNT {
+    let cell_count = color_grid.len();
+    let size = (cell_count as f64).sqrt() as usize;
+    if size * size != cell_count {
         return Err(DifficultyError::BadGridLength {
-            expected: CELL_COUNT,
-            actual: color_grid.len(),
+            expected: size * size,
+            actual: cell_count,
         });
     }
 
-    let mut colors = [Color::White; CELL_COUNT];
+    let mut colors = Vec::with_capacity(cell_count);
     for (i, &v) in color_grid.iter().enumerate() {
-        colors[i] = Color::from_u8(v).ok_or(DifficultyError::BadColor { index: i, value: v })?;
+        colors.push(Color::from_u8(v).ok_or(DifficultyError::BadColor { index: i, value: v })?);
     }
 
-    let solver = Solver::new(colors);
+    let solver = Solver::new(size, colors);
 
     // 先做“人类逻辑难度”分析：不依赖求解器枚举分支的工作量统计。
     let human = solver.analyze_human_difficulty();
