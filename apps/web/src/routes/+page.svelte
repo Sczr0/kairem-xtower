@@ -38,6 +38,7 @@
 	import { fade, slide } from 'svelte/transition';
 	import { colorBlindEnabled } from '$lib/a11y';
 	import { readTutorialDismissedAt, setTutorialDismissed, shouldAutoShowTutorial } from '$lib/tutorial.js';
+	import { readProgressListOpen, writeProgressListOpen } from '$lib/ui-prefs.js';
 
 	// --- 逻辑部分保持不变 ---
 	let engine: Engine | null = null;
@@ -91,6 +92,7 @@
 	let clockTick = 0;
 	let allRulesDetailsEl: HTMLDetailsElement | null = null;
 	let ruleCardEls: Record<string, HTMLElement | null> = {};
+	let progressListOpen = true;
 
 	function ruleRef(node: HTMLElement, id: string) {
 		ruleCardEls[id] = node;
@@ -963,6 +965,9 @@
 	}
 
 	onMount(() => {
+		// UI 偏好：存档列表折叠状态（仅影响侧边栏展示）
+		progressListOpen = readProgressListOpen();
+
 		const onVisibility = () => {
 			if (document.visibilityState === 'hidden') {
 				pauseTimer();
@@ -1384,7 +1389,15 @@
 						</div>
 					</div>
 
-					<div class="progress-list">
+					<details
+						class="progress-details"
+						bind:open={progressListOpen}
+						on:toggle={() => writeProgressListOpen(progressListOpen)}
+					>
+						<summary class="progress-summary">
+							存档列表 <span class="badge-count">{progressEntries.length}</span>
+						</summary>
+						<div class="progress-list">
 						{#if progressEntries.length === 0}
 							<div class="empty-placeholder">暂无存档</div>
 						{:else}
@@ -1411,6 +1424,7 @@
 							清空全部
 						</button>
 					</div>
+				</details>
 				</div>
 
 				<div class="sidebar-card hint-section">
@@ -1773,7 +1787,6 @@
 	}
 
 	.progress-list {
-		margin-top: 12px;
 		display: grid;
 		gap: 10px;
 	}
@@ -1805,6 +1818,38 @@
 		margin-top: 10px;
 		display: flex;
 		justify-content: flex-end;
+	}
+
+	.progress-details {
+		margin-top: 12px;
+	}
+
+	.progress-details > summary {
+		list-style: none;
+	}
+
+	.progress-details > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.progress-summary {
+		padding: 10px 12px;
+		font-weight: 800;
+		cursor: pointer;
+		user-select: none;
+		background: var(--bg-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		color: var(--text);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.progress-details[open] .progress-summary {
+		border-color: var(--border-2);
+		margin-bottom: 10px;
 	}
 
 	.hint-header {

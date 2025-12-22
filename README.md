@@ -1,6 +1,6 @@
 # Kairem-Xtower
 
-基于 Rust(WASM) + SvelteKit 的逻辑解谜游戏引擎与网页端原型。
+基于 Rust(WASM) + SvelteKit 的逻辑解谜游戏引擎与网页端。
 
 ## 目录结构
 
@@ -26,3 +26,10 @@ pnpm rebuild esbuild
 pnpm wasm:build
 pnpm dev
 ```
+
+## 感谢
+
+
+本项目由[阿里云ESA](https://www.aliyun.com/product/esa?spm=a2c22.12281978.0.0.6fb227c6lqKX4n)提供加速、计算和保护
+
+![阿里云ESA](image.png)
