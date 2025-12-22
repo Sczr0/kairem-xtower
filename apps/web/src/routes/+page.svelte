@@ -35,7 +35,8 @@
 	import {
 		generatePuzzleAsync,
 		getDifficultyReportAsync,
-		getSolutionCountAsync
+		getSolutionCountAsync,
+		getSolutionCountWithCheckedAsync
 	} from '$lib/wasm/async';
 	import { browser, dev } from '$app/environment';
 	import { onMount, tick } from 'svelte';
@@ -95,6 +96,10 @@
 	let hintExplainDetailsOpen = false;
 	let totalTimeMs = 0;
 	let clockTick = 0;
+	let solutionCount: number | null = null;
+	let solutionTruncated = false;
+	let initialSolutionCount: number | null = null;
+	let initialSolutionTruncated = false;
 	let allRulesDetailsEl: HTMLDetailsElement | null = null;
 	let ruleCardEls: Record<string, HTMLElement | null> = {};
 	let progressListOpen = true;
@@ -149,6 +154,11 @@
 	$: hintExplain = buildHintExplain(hint);
 	$: currentProgressKey = safeCurrentPuzzleKey();
 	$: totalTimeMs = snapshotTimeMs(clockTick || Date.now());
+	$: {
+		if (engine && checkedMask >= 0n) {
+			refreshSolutionCount();
+		}
+	}
 
 	function snapshotTimeMs(now = Date.now()): number {
 		if (timerStartedAt === null) return Math.max(0, timeMs);
@@ -554,6 +564,37 @@
 		}
 	}
 
+	async function refreshSolutionCount() {
+		if (!engine) return;
+		try {
+			const res = await getSolutionCountWithCheckedAsync(
+				BigInt(checkedMask),
+				new Uint8Array(grid),
+				100
+			);
+			solutionCount = res.count;
+			solutionTruncated = res.truncated;
+		} catch (e) {
+			console.error('计算解数量失败', e);
+		}
+	}
+
+	async function refreshInitialSolutionCount() {
+		if (!engine) return;
+		try {
+			const blackMask = blackMaskFromGrid(grid);
+			const res = await getSolutionCountWithCheckedAsync(
+				blackMask,
+				new Uint8Array(grid),
+				100
+			);
+			initialSolutionCount = res.count;
+			initialSolutionTruncated = res.truncated;
+		} catch (e) {
+			console.error('计算初始解数量失败', e);
+		}
+	}
+
 	function focusRuleByIndex(i: number) {
 		const color = grid[i];
 		hoveredRuleId = colorRuleMap[color] ?? null;
@@ -763,6 +804,7 @@
 		restoreProgressIfAny();
 		refreshValidate();
 		refreshDifficulty();
+		refreshInitialSolutionCount();
 		if (opts.updateUrl) replaceUrlSeed(seed);
 		persistProgress();
 	}
@@ -788,6 +830,7 @@
 		restoreProgressIfAny();
 		refreshValidate();
 		refreshDifficulty();
+		refreshInitialSolutionCount();
 		if (opts.updateUrl) {
 			try {
 				const code = levelCode ?? encodeLevel(grid);
@@ -1134,6 +1177,18 @@
 						{:else}
 							<span class="difficulty-chip difficulty-unknown" title="难度分未计算">难度 --</span>
 						{/if}
+						<span class="difficulty-chip" title="当前剩余解 / 初始解">
+							{#if solutionCount === null}
+								解: --
+							{:else}
+								解: {solutionCount}{solutionTruncated ? '+' : ''}
+								{#if initialSolutionCount !== null}
+									<span class="text-muted" style="margin-left: 2px; opacity: 0.7;">
+										/ {initialSolutionCount}{initialSolutionTruncated ? '+' : ''}
+									</span>
+								{/if}
+							{/if}
+						</span>
 					</div>
 
 					<div class="game-actions">

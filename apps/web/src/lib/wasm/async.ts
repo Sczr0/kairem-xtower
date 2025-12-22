@@ -42,3 +42,15 @@ export async function getSolutionCountAsync(
 ): Promise<SolutionCountResult> {
 	return callWorker('solution_count', { color_grid: colorGrid, limit });
 }
+
+export async function getSolutionCountWithCheckedAsync(
+	checkedMask: bigint,
+	colorGrid: Uint8Array,
+	limit: number
+): Promise<SolutionCountResult> {
+	return callWorker('solution_count_with_checked', {
+		checked_mask: checkedMask,
+		color_grid: colorGrid,
+		limit
+	});
+}

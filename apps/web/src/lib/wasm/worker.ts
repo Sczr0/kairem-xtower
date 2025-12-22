@@ -25,6 +25,13 @@ self.onmessage = async (e: MessageEvent) => {
 			case 'solution_count':
 				result = eng.solution_count(payload.color_grid, payload.limit);
 				break;
+			case 'solution_count_with_checked':
+				result = eng.solution_count_with_checked(
+					payload.checked_mask,
+					payload.color_grid,
+					payload.limit
+				);
+				break;
 			default:
 				throw new Error(`Unknown task type: ${type}`);
 		}
