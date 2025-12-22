@@ -85,6 +85,8 @@
 	let hintLoading = false;
 	let hintExplain: string | null = null;
 	let hintExplainCells: number[] = [];
+	let hintExplainSecondaryCells: number[] = [];
+	let hintExplainDetailsOpen = false;
 	let totalTimeMs = 0;
 	let clockTick = 0;
 	let allRulesDetailsEl: HTMLDetailsElement | null = null;
@@ -298,6 +300,8 @@
 		hintIndex = null;
 		hintAction = null;
 		hintExplainCells = [];
+		hintExplainSecondaryCells = [];
+		hintExplainDetailsOpen = false;
 	}
 
 	function lockBodyScrollForTutorial() {
@@ -668,6 +672,7 @@
 		try {
 			const res = engine.hint_next(checkedMask >>> 0, new Uint8Array(grid));
 			hint = res;
+			hintExplainDetailsOpen = false;
 			if (Array.isArray(res.reason?.affectedCells)) {
 				const raw = res.reason?.affectedCells ?? [];
 				hintExplainCells = raw
@@ -677,6 +682,15 @@
 				hintExplainCells = [res.move.cell];
 			} else {
 				hintExplainCells = [];
+			}
+
+			if (Array.isArray(res.reason?.secondaryCells)) {
+				const raw = res.reason?.secondaryCells ?? [];
+				hintExplainSecondaryCells = raw
+					.filter((x) => typeof x === 'number' && x >= 0 && x < 25)
+					.filter((x, idx, arr) => arr.indexOf(x) === idx);
+			} else {
+				hintExplainSecondaryCells = [];
 			}
 			hintCount += 1;
 			persistProgress();
@@ -1228,6 +1242,7 @@
 						marks={marks}
 						colorBlindMode={$colorBlindEnabled}
 						highlightCells={hintExplainCells}
+						highlightCellsSecondary={hintExplainDetailsOpen ? hintExplainSecondaryCells : []}
 						cellOk={validate?.cell_ok ?? Array(25).fill(true)}
 						hintIndex={hintIndex}
 						hintAction={hintAction}
@@ -1362,6 +1377,23 @@
 							<div class="hint-message">{hint.message}</div>
 							{#if hintExplain}
 								<div class="hint-explain">{hintExplain}</div>
+							{/if}
+							{#if (hintExplainSecondaryCells.length > 0 || (hint.reason?.steps?.length ?? 0) > 0) && hint.move}
+								<div class="hint-detail-row">
+									<button class="btn btn-ghost" type="button" on:click={() => (hintExplainDetailsOpen = !hintExplainDetailsOpen)}>
+										{hintExplainDetailsOpen ? '收起详细' : '详细解释'}
+									</button>
+									<span class="hint-detail-hint">展开后会显示推导链并追加高亮范围</span>
+								</div>
+							{/if}
+							{#if hintExplainDetailsOpen && (hint.reason?.steps?.length ?? 0) > 0}
+								<ol class="hint-steps">
+									{#each hint.reason?.steps ?? [] as s}
+										<li class="hint-step">
+											<div class="hint-step-title">{s.title}</div>
+										</li>
+									{/each}
+								</ol>
 							{/if}
 							{#if hint.move}
 								<div class="hint-meta">
@@ -1807,6 +1839,34 @@
 		color: var(--muted);
 		line-height: 1.5;
 		white-space: pre-line;
+	}
+
+	.hint-detail-row {
+		margin-top: 10px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.hint-detail-hint {
+		font-size: 0.82rem;
+		color: var(--muted);
+	}
+
+	.hint-steps {
+		margin: 10px 0 0;
+		padding-left: 18px;
+		color: var(--text);
+	}
+
+	.hint-step {
+		margin: 6px 0;
+	}
+
+	.hint-step-title {
+		font-size: 0.86rem;
+		line-height: 1.45;
 	}
 
 	.hint-meta {

@@ -12,6 +12,8 @@
 	export let colorBlindMode = false;
 	// 提示解释高亮（结构化 reason 的 affectedCells）
 	export let highlightCells: number[] = [];
+	// 提示解释次级高亮（结构化 reason 的 secondaryCells，面向教学的上下文）
+	export let highlightCellsSecondary: number[] = [];
 	export let cellOk: boolean[] = Array.from({ length: 25 }, () => true);
 	export let onToggle: (index: number) => void = () => {};
 	export let onMarkCycle: (index: number) => void = () => {};
@@ -29,6 +31,7 @@
 	$: checkedFlags = indices.map((i) => ((checkedMask >>> 0) & (1 << i)) !== 0);
 	$: blackFlags = indices.map((i) => grid[i] === Color.Black);
 	$: explainFlags = indices.map((i) => (highlightCells ?? []).includes(i));
+	$: explainSecondaryFlags = indices.map((i) => (highlightCellsSecondary ?? []).includes(i));
 
 	const cellEls: (HTMLButtonElement | null)[] = Array.from({ length: 25 }, () => null);
 
@@ -218,7 +221,7 @@
 		<div class="cell-wrapper">
 			<button
 				type="button"
-				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && explainFlags[i] ? 'explain' : ''} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
+				class="cell {mode === 'play' && checkedFlags[i] ? 'checked' : ''} {cellOk[i] ? '' : 'invalid'} {mode === 'play' && explainFlags[i] ? 'explain' : ''} {mode === 'play' && !explainFlags[i] && explainSecondaryFlags[i] ? 'explain-secondary' : ''} {mode === 'play' && hintIndex === i ? 'hint' : ''} {mode === 'play' && hintIndex === i && hintAction ? `hint-${hintAction}` : ''}"
 				style="--cell-color: {colorToCss(grid[i])}"
 				aria-pressed={mode === 'play' ? checkedFlags[i] : undefined}
 				aria-label={cellAriaLabel(i)}
@@ -389,6 +392,12 @@
 		/* 与 hint ring 不冲突：更轻的“底色强调” */
 		box-shadow:
 			0 0 0 3px color-mix(in srgb, var(--c-blue) 20%, transparent),
+			var(--inset-highlight);
+	}
+
+	.cell.explain-secondary {
+		box-shadow:
+			0 0 0 2px color-mix(in srgb, var(--c-blue) 12%, transparent),
 			var(--inset-highlight);
 	}
 

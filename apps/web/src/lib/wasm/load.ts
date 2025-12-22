@@ -35,10 +35,18 @@ export type HintStatus = 'no_solution' | 'forced' | 'suggested';
 
 export type HintReasonKind = 'propagate' | 'contradiction' | 'suggest' | 'repair';
 
+export type HintReasonStep = {
+	title: string;
+	ruleId?: string;
+	cells?: number[];
+};
+
 export type HintReason = {
 	kind: HintReasonKind;
 	ruleId?: string;
 	affectedCells?: number[];
+	secondaryCells?: number[];
+	steps?: HintReasonStep[];
 };
 
 export type HintResult = {

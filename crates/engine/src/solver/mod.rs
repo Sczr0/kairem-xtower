@@ -14,7 +14,6 @@ fn cell_id(row: usize, col: usize, size: usize) -> usize {
 #[derive(Clone, Debug)]
 struct RuleSet {
     size: usize,
-    colors: Vec<Color>,
 
     black_cells: Vec<usize>,
     blue_cells: Vec<usize>,
@@ -131,7 +130,6 @@ impl RuleSet {
 
         Self {
             size,
-            colors,
             black_cells,
             blue_cells,
             red_cells,
@@ -251,6 +249,10 @@ trait SolveObserver {
     fn on_propagate_round(&mut self) {}
     fn on_assignment(&mut self, _reason: AssignReason) {}
     fn on_rule_trigger(&mut self, _rule: RuleType, _is_first: bool) {}
+    fn on_rule_enter(&mut self, _rule: RuleType) {}
+    fn on_rule_focus(&mut self, _rule: RuleType, _cells: &[usize]) {}
+    fn on_rule_exit(&mut self, _rule: RuleType) {}
+    fn on_cell_assignment(&mut self, _cell: usize, _is_checked: bool, _reason: AssignReason) {}
     fn on_backtrack(&mut self, _from_depth: u32, _to_depth: u32) {}
 }
 
@@ -376,6 +378,7 @@ fn try_set_checked<O: SolveObserver>(
     match state.set_checked(row, col) {
         Ok(true) => {
             obs.on_assignment(reason);
+            obs.on_cell_assignment(cell_id(row, col, state.size()), true, reason);
             true
         }
         Ok(false) => true,
@@ -393,6 +396,7 @@ fn try_set_unchecked<O: SolveObserver>(
     match state.set_unchecked(row, col) {
         Ok(true) => {
             obs.on_assignment(reason);
+            obs.on_cell_assignment(cell_id(row, col, state.size()), false, reason);
             true
         }
         Ok(false) => true,
@@ -409,6 +413,7 @@ fn try_set_checked_id<O: SolveObserver>(
     match state.set_checked_id(id) {
         Ok(true) => {
             obs.on_assignment(reason);
+            obs.on_cell_assignment(id, true, reason);
             true
         }
         Ok(false) => true,
@@ -425,6 +430,7 @@ fn try_set_unchecked_id<O: SolveObserver>(
     match state.set_unchecked_id(id) {
         Ok(true) => {
             obs.on_assignment(reason);
+            obs.on_cell_assignment(id, false, reason);
             true
         }
         Ok(false) => true,
@@ -491,6 +497,91 @@ pub struct HintReason {
     /// 需要在 UI 中强调的格子（可用于高亮）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affected_cells: Vec<usize>,
+    /// 解释用的“次级高亮”：展示与推导相关的一圈上下文格子（用于教学）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secondary_cells: Vec<usize>,
+    /// 详细推导链（用于“简洁/详细”切换）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<HintReasonStep>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HintReasonStep {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<&'static str>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<usize>,
+}
+
+fn rule_type_to_rule_id(rule: RuleType) -> &'static str {
+    match rule {
+        RuleType::Green => "green",
+        RuleType::Yellow => "yellow",
+        RuleType::Red => "red",
+        RuleType::Blue => "blue",
+        RuleType::Purple => "purple",
+        RuleType::Orange => "orange",
+        RuleType::Cyan => "cyan",
+        RuleType::FiveInRow => "bingo",
+    }
+}
+
+fn rule_type_to_title(rule: RuleType) -> &'static str {
+    match rule {
+        RuleType::Green => "绿格（行列计数相等）",
+        RuleType::Yellow => "黄格（对角线计数相等）",
+        RuleType::Red => "红格（八邻至少一格勾选）",
+        RuleType::Blue => "蓝格（八邻最多两格勾选）",
+        RuleType::Purple => "紫格（八邻勾选数为奇数）",
+        RuleType::Orange => "橙格（八邻勾选数为偶数）",
+        RuleType::Cyan => "青格（四邻约束）",
+        RuleType::FiveInRow => "五连线（Bingo）",
+    }
+}
+
+#[derive(Default)]
+struct HintExplainObserver {
+    current_rule: Option<RuleType>,
+    current_focus: Vec<usize>,
+    // 仅记录传播阶段的“首次赋值原因”，用于解释强制结论。
+    propagate_assignments: std::collections::HashMap<usize, (Option<RuleType>, Vec<usize>, bool)>,
+}
+
+impl HintExplainObserver {
+    fn propagate_info(&self, cell: usize) -> Option<(Option<RuleType>, &Vec<usize>, bool)> {
+        self.propagate_assignments
+            .get(&cell)
+            .map(|(r, focus, is_checked)| (*r, focus, *is_checked))
+    }
+}
+
+impl SolveObserver for HintExplainObserver {
+    fn on_rule_enter(&mut self, rule: RuleType) {
+        self.current_rule = Some(rule);
+        self.current_focus.clear();
+    }
+
+    fn on_rule_focus(&mut self, rule: RuleType, cells: &[usize]) {
+        self.current_rule = Some(rule);
+        self.current_focus = cells.to_vec();
+    }
+
+    fn on_rule_exit(&mut self, _rule: RuleType) {
+        self.current_rule = None;
+        self.current_focus.clear();
+    }
+
+    fn on_cell_assignment(&mut self, cell: usize, is_checked: bool, reason: AssignReason) {
+        if !matches!(reason, AssignReason::Propagate) {
+            return;
+        }
+        // 只记录第一次：避免后续传播覆盖“最早的解释上下文”
+        self.propagate_assignments
+            .entry(cell)
+            .or_insert((self.current_rule, self.current_focus.clone(), is_checked));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -510,21 +601,6 @@ impl Solver {
         }
     }
 
-    fn rule_id_for_cell(&self, cell: usize) -> Option<&'static str> {
-        let c = *self.rules.colors.get(cell)?;
-        match c {
-            Color::Red => Some("red"),
-            Color::Blue => Some("blue"),
-            Color::Green => Some("green"),
-            Color::Yellow => Some("yellow"),
-            Color::Purple => Some("purple"),
-            Color::Orange => Some("orange"),
-            Color::Cyan => Some("cyan"),
-            Color::Black => Some("black"),
-            _ => None,
-        }
-    }
-
     /// 提示下一步（面向 UI 的“分层提示”）：
     ///
     /// - 将 `checked_mask` 视为“已确认勾选”的集合，其余格子仍视为未知；
@@ -537,7 +613,7 @@ impl Solver {
         const VALID_CELL_MASK: u32 = (1u32 << CELL_COUNT) - 1;
         let checked_mask = checked_mask & VALID_CELL_MASK;
 
-        let Some((state, solution)) = self.solve_one_with_checked_mask(checked_mask) else {
+        let Some((state, solution, hint_obs)) = self.solve_one_with_checked_mask_with_hint_trace(checked_mask) else {
             // 无解：尝试找一个“撤销某个勾选后可行”的建议（用于把用户从死路拉回来）。
             for &cell in &self.rules.decision_order {
                 let bit = 1u32 << cell;
@@ -561,8 +637,25 @@ impl Solver {
                         }),
                         reason: Some(HintReason {
                             kind: HintReasonKind::Repair,
-                            rule_id: self.rule_id_for_cell(cell),
+                            rule_id: None,
                             affected_cells: vec![cell],
+                            secondary_cells: vec![],
+                            steps: vec![
+                                HintReasonStep {
+                                    title: "当前勾选已无解：建议先回到“可解状态”再继续推理。".to_string(),
+                                    rule_id: None,
+                                    cells: vec![],
+                                },
+                                HintReasonStep {
+                                    title: format!(
+                                        "尝试取消勾选：({},{})（可恢复到可解状态）",
+                                        (cell / self.rules.size) + 1,
+                                        (cell % self.rules.size) + 1
+                                    ),
+                                    rule_id: None,
+                                    cells: vec![cell],
+                                },
+                            ],
                         }),
                     };
                 }
@@ -580,6 +673,29 @@ impl Solver {
         for &cell in &self.rules.decision_order {
             let bit = 1u32 << cell;
             if (checked_mask & bit) == 0 && state.is_checked_id(cell) {
+                let mut rule_id = None;
+                let mut secondary = vec![];
+                let mut steps = vec![];
+                if let Some((rule, focus, _is_checked)) = hint_obs.propagate_info(cell) {
+                    if let Some(rule) = rule {
+                        rule_id = Some(rule_type_to_rule_id(rule));
+                        secondary = focus.clone();
+                        steps.push(HintReasonStep {
+                            title: format!("推导：{} 触发了传播。", rule_type_to_title(rule)),
+                            rule_id,
+                            cells: secondary.clone(),
+                        });
+                    }
+                }
+                steps.push(HintReasonStep {
+                    title: format!(
+                        "结论：({},{}) 必须勾选。",
+                        (cell / self.rules.size) + 1,
+                        (cell % self.rules.size) + 1
+                    ),
+                    rule_id: None,
+                    cells: vec![cell],
+                });
                 return HintResult {
                     status: HintStatus::Forced,
                     message: format!(
@@ -594,8 +710,10 @@ impl Solver {
                     }),
                     reason: Some(HintReason {
                         kind: HintReasonKind::Propagate,
-                        rule_id: self.rule_id_for_cell(cell),
+                        rule_id,
                         affected_cells: vec![cell],
+                        secondary_cells: secondary,
+                        steps,
                     }),
                 };
             }
@@ -615,6 +733,29 @@ impl Solver {
                 continue;
             }
 
+            let mut rule_id = None;
+            let mut secondary = vec![];
+            let mut steps = vec![];
+            if let Some((rule, focus, _is_checked)) = hint_obs.propagate_info(cell) {
+                if let Some(rule) = rule {
+                    rule_id = Some(rule_type_to_rule_id(rule));
+                    secondary = focus.clone();
+                    steps.push(HintReasonStep {
+                        title: format!("推导：{} 触发了传播。", rule_type_to_title(rule)),
+                        rule_id,
+                        cells: secondary.clone(),
+                    });
+                }
+            }
+            steps.push(HintReasonStep {
+                title: format!(
+                    "结论：({},{}) 必须不勾选。",
+                    (cell / self.rules.size) + 1,
+                    (cell % self.rules.size) + 1
+                ),
+                rule_id: None,
+                cells: vec![cell],
+            });
             return HintResult {
                 status: HintStatus::Forced,
                 message: format!(
@@ -629,8 +770,10 @@ impl Solver {
                 }),
                 reason: Some(HintReason {
                     kind: HintReasonKind::Propagate,
-                    rule_id: self.rule_id_for_cell(cell),
+                    rule_id,
                     affected_cells: vec![cell],
+                    secondary_cells: secondary,
+                    steps,
                 }),
             };
         }
@@ -660,8 +803,14 @@ impl Solver {
                         }),
                         reason: Some(HintReason {
                             kind: HintReasonKind::Contradiction,
-                            rule_id: self.rule_id_for_cell(cell),
+                            rule_id: None,
                             affected_cells: vec![cell],
+                            secondary_cells: vec![],
+                            steps: vec![HintReasonStep {
+                                title: "反证：如果选择相反操作，会在传播中走到矛盾/无解。".to_string(),
+                                rule_id: None,
+                                cells: vec![cell],
+                            }],
                         }),
                     };
                 }
@@ -681,8 +830,14 @@ impl Solver {
                     }),
                     reason: Some(HintReason {
                         kind: HintReasonKind::Contradiction,
-                        rule_id: self.rule_id_for_cell(cell),
+                        rule_id: None,
                         affected_cells: vec![cell],
+                        secondary_cells: vec![],
+                        steps: vec![HintReasonStep {
+                            title: "反证：如果选择相反操作，会在传播中走到矛盾/无解。".to_string(),
+                            rule_id: None,
+                            cells: vec![cell],
+                        }],
                     }),
                 };
             }
@@ -692,6 +847,7 @@ impl Solver {
         for &cell in &self.rules.decision_order {
             let bit = 1u32 << cell;
             if (checked_mask & bit) == 0 && (solution & bit) != 0 {
+                let line = self.best_bingo_line_for_cell(solution, cell);
                 return HintResult {
                     status: HintStatus::Suggested,
                     message: format!(
@@ -706,8 +862,25 @@ impl Solver {
                     }),
                     reason: Some(HintReason {
                         kind: HintReasonKind::Suggest,
-                        rule_id: self.rule_id_for_cell(cell),
+                        rule_id: Some("bingo"),
                         affected_cells: vec![cell],
+                        secondary_cells: line.clone(),
+                        steps: vec![
+                            HintReasonStep {
+                                title: "目标：达成至少一条五连线（Bingo）。".to_string(),
+                                rule_id: Some("bingo"),
+                                cells: line,
+                            },
+                            HintReasonStep {
+                                title: format!(
+                                    "建议：先勾选 ({},{}) 作为推进方向（不保证唯一）。",
+                                    (cell / self.rules.size) + 1,
+                                    (cell % self.rules.size) + 1
+                                ),
+                                rule_id: None,
+                                cells: vec![cell],
+                            },
+                        ],
                     }),
                 };
             }
@@ -749,6 +922,82 @@ impl Solver {
         let mut out = Vec::new();
         self.search(state.clone(), 1, &mut out, 0, &mut obs);
         out.first().copied().map(|mask| (state, mask))
+    }
+
+    fn solve_one_with_checked_mask_with_hint_trace(
+        &self,
+        checked_mask: Mask,
+    ) -> Option<(SolverState, Mask, HintExplainObserver)> {
+        let mut state = SolverState::new(self.rules.size);
+        let mut obs = HintExplainObserver::default();
+
+        for &id in &self.rules.black_cells {
+            if !try_set_checked_id(&mut state, id, AssignReason::Initial, &mut obs) {
+                return None;
+            }
+        }
+
+        // 将 checked_mask 视为“已确认勾选”，其余保持未知。
+        for &cell in &self.rules.decision_order {
+            let bit = 1u32 << cell;
+            if (checked_mask & bit) != 0 {
+                if !try_set_checked_id(&mut state, cell, AssignReason::Initial, &mut obs) {
+                    return None;
+                }
+            }
+        }
+
+        if !self.propagate_to_fixpoint(&mut state, &mut obs) {
+            return None;
+        }
+
+        let mut out = Vec::new();
+        let mut search_obs = ();
+        self.search(state.clone(), 1, &mut out, 0, &mut search_obs);
+        let solution = out.first().copied()?;
+        Some((state, solution, obs))
+    }
+
+    fn best_bingo_line_for_cell(&self, solution: Mask, cell: usize) -> Vec<usize> {
+        let size = self.rules.size;
+        if size != GRID_SIZE {
+            // 当前产品约束是 5x5；若未来扩展 size，可在这里做更通用的线段枚举。
+            return vec![cell];
+        }
+
+        let row = cell / size;
+        let col = cell % size;
+
+        let mut candidates: Vec<Vec<usize>> = Vec::new();
+
+        // 行
+        candidates.push((0..size).map(|c| cell_id(row, c, size)).collect());
+        // 列
+        candidates.push((0..size).map(|r| cell_id(r, col, size)).collect());
+        // 主对角线
+        if row == col {
+            candidates.push((0..size).map(|k| cell_id(k, k, size)).collect());
+        }
+        // 副对角线
+        if row + col == size - 1 {
+            candidates.push((0..size).map(|k| cell_id(k, size - 1 - k, size)).collect());
+        }
+
+        let mut best = vec![cell];
+        let mut best_score = -1i32;
+        for line in candidates {
+            let mut score = 0i32;
+            for &id in &line {
+                if (solution & (1u32 << id)) != 0 {
+                    score += 1;
+                }
+            }
+            if score > best_score {
+                best_score = score;
+                best = line;
+            }
+        }
+        best
     }
 
     /// 求解并返回最多 `limit` 个解（limit=0 视为不限制）。
@@ -1138,86 +1387,115 @@ impl Solver {
             let old = state.hash64();
             obs.on_propagate_round();
 
-            let mut any_rule_triggered = false;
+            let mut first_triggered_rule: Option<RuleType> = None;
 
             // 传播规则并记录第一个触发的规则
+            obs.on_rule_enter(RuleType::Green);
             if !self.propagate_green(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Green);
             let green_triggered = state.hash64() != old;
             if green_triggered {
-                obs.on_rule_trigger(RuleType::Green, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Green, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Green);
+                }
             }
 
             let green_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Yellow);
             if !self.propagate_yellow(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Yellow);
             let yellow_triggered = state.hash64() != green_hash;
             if yellow_triggered {
-                obs.on_rule_trigger(RuleType::Yellow, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Yellow, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Yellow);
+                }
             }
 
             let yellow_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Blue);
             if !self.propagate_blue(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Blue);
             let blue_triggered = state.hash64() != yellow_hash;
             if blue_triggered {
-                obs.on_rule_trigger(RuleType::Blue, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Blue, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Blue);
+                }
             }
 
             let blue_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Red);
             if !self.propagate_red(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Red);
             let red_triggered = state.hash64() != blue_hash;
             if red_triggered {
-                obs.on_rule_trigger(RuleType::Red, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Red, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Red);
+                }
             }
 
             let red_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Purple);
             if !self.propagate_purple(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Purple);
             let purple_triggered = state.hash64() != red_hash;
             if purple_triggered {
-                obs.on_rule_trigger(RuleType::Purple, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Purple, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Purple);
+                }
             }
 
             let purple_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Orange);
             if !self.propagate_orange(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Orange);
             let orange_triggered = state.hash64() != purple_hash;
             if orange_triggered {
-                obs.on_rule_trigger(RuleType::Orange, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Orange, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Orange);
+                }
             }
 
             let orange_hash = state.hash64();
+            obs.on_rule_enter(RuleType::Cyan);
             if !self.propagate_cyan(state, obs) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::Cyan);
             let cyan_triggered = state.hash64() != orange_hash;
             if cyan_triggered {
-                obs.on_rule_trigger(RuleType::Cyan, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::Cyan, first_triggered_rule.is_none());
+                if first_triggered_rule.is_none() {
+                    first_triggered_rule = Some(RuleType::Cyan);
+                }
             }
 
             let cyan_hash = state.hash64();
+            obs.on_rule_enter(RuleType::FiveInRow);
             if !self.propagate_five_in_a_row_possible(state) {
                 return false;
             }
+            obs.on_rule_exit(RuleType::FiveInRow);
             let five_in_row_triggered = state.hash64() != cyan_hash;
             if five_in_row_triggered {
-                obs.on_rule_trigger(RuleType::FiveInRow, !any_rule_triggered);
-                any_rule_triggered = true;
+                obs.on_rule_trigger(RuleType::FiveInRow, first_triggered_rule.is_none());
             }
 
             if state.hash64() == old {
@@ -1231,6 +1509,18 @@ impl Solver {
         for &id in &self.rules.green_cells {
             let row = id / self.rules.size;
             let col = id % self.rules.size;
+            // 教学：绿格推导涉及“该行 + 该列”
+            let mut focus = Vec::with_capacity(self.rules.size * 2);
+            for c in 0..self.rules.size {
+                focus.push(cell_id(row, c, self.rules.size));
+            }
+            for r in 0..self.rules.size {
+                let cid = cell_id(r, col, self.rules.size);
+                if !focus.contains(&cid) {
+                    focus.push(cid);
+                }
+            }
+            obs.on_rule_focus(RuleType::Green, &focus);
             let (r_min, r_max) = state.row_min_max(row);
             let (c_min, c_max) = state.col_min_max(col);
 
@@ -1272,6 +1562,16 @@ impl Solver {
             let (d_min, d_max) = state.diag_down_min_max(down_id);
             let (u_min, u_max) = state.diag_up_min_max(up_id);
 
+            // 教学：黄格推导涉及“交叉两条对角线”
+            let mut focus = Vec::new();
+            focus.extend_from_slice(&self.rules.diag_down_cells[down_id]);
+            for &cid in &self.rules.diag_up_cells[up_id] {
+                if !focus.contains(&cid) {
+                    focus.push(cid);
+                }
+            }
+            obs.on_rule_focus(RuleType::Yellow, &focus);
+
             if d_max < u_min || u_max < d_min {
                 return false;
             }
@@ -1300,6 +1600,11 @@ impl Solver {
 
     fn propagate_red(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.red_cells {
+            // 教学：红格推导范围 = 自身 + 八邻
+            let mut focus = Vec::with_capacity(1 + self.rules.neighbors8[id].len());
+            focus.push(id);
+            focus.extend_from_slice(&self.rules.neighbors8[id]);
+            obs.on_rule_focus(RuleType::Red, &focus);
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
             let mut unknown_count = 0usize;
@@ -1335,6 +1640,11 @@ impl Solver {
 
     fn propagate_blue(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.blue_cells {
+            // 教学：蓝格推导范围 = 自身 + 八邻
+            let mut focus = Vec::with_capacity(1 + self.rules.neighbors8[id].len());
+            focus.push(id);
+            focus.extend_from_slice(&self.rules.neighbors8[id]);
+            obs.on_rule_focus(RuleType::Blue, &focus);
             let mut checked = 0usize;
             let mut unknowns = Vec::new();
             for &n in &self.rules.neighbors8[id] {
@@ -1363,6 +1673,11 @@ impl Solver {
 
     fn propagate_purple(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.purple_cells {
+            // 教学：紫格推导范围 = 自身 + 八邻
+            let mut focus = Vec::with_capacity(1 + self.rules.neighbors8[id].len());
+            focus.push(id);
+            focus.extend_from_slice(&self.rules.neighbors8[id]);
+            obs.on_rule_focus(RuleType::Purple, &focus);
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
             let mut unknown_count = 0usize;
@@ -1402,6 +1717,11 @@ impl Solver {
 
     fn propagate_orange(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.orange_cells {
+            // 教学：橙格推导范围 = 自身 + 八邻
+            let mut focus = Vec::with_capacity(1 + self.rules.neighbors8[id].len());
+            focus.push(id);
+            focus.extend_from_slice(&self.rules.neighbors8[id]);
+            obs.on_rule_focus(RuleType::Orange, &focus);
             let mut checked = 0usize;
             let mut last_unknown: Option<usize> = None;
             let mut unknown_count = 0usize;
@@ -1441,6 +1761,11 @@ impl Solver {
 
     fn propagate_cyan(&self, state: &mut SolverState, obs: &mut impl SolveObserver) -> bool {
         for &id in &self.rules.cyan_cells {
+            // 教学：青格推导范围 = 自身 + 四邻
+            let mut focus = Vec::with_capacity(1 + self.rules.neighbors4[id].len());
+            focus.push(id);
+            focus.extend_from_slice(&self.rules.neighbors4[id]);
+            obs.on_rule_focus(RuleType::Cyan, &focus);
             let (row, col) = (id / self.rules.size, id % self.rules.size);
 
             // 未勾选：规则不生效
@@ -1913,5 +2238,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn hint_suggest_includes_bingo_context_and_steps() {
+        // 构造一个“只有 Bingo 目标、没有颜色约束”的局面：
+        // - 不会出现传播强制
+        // - 不会出现反证强制
+        // 因此应回落到“从一个可行解抽取一步”的建议，并提供 bingo 的教学上下文。
+        let colors = [Color::White; CELL_COUNT];
+        let solver = Solver::new(colors);
+        let hint = solver.hint_next(0u32);
+
+        assert!(matches!(hint.status, HintStatus::Suggested));
+        let mv = hint.mv.expect("suggest should include a move");
+        let reason = hint.reason.expect("suggest should include reason");
+
+        assert!(matches!(reason.kind, HintReasonKind::Suggest));
+        assert_eq!(reason.rule_id, Some("bingo"));
+        assert!(reason.affected_cells.contains(&mv.cell));
+        assert_eq!(reason.secondary_cells.len(), GRID_SIZE);
+        assert!(reason.secondary_cells.contains(&mv.cell));
+        assert!(!reason.steps.is_empty());
     }
 }
