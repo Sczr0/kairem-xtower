@@ -6,20 +6,27 @@ import { build, files, prerendered, version } from '$service-worker';
 //
 // 目标：
 // - 预缓存构建产物与静态文件（含 wasm、manifest、favicon）
-// - 导航请求 network-first，离线时回退到缓存的 `/`
+// - 导航请求 network-first，离线时回退到离线提示页（而不是统一回退 `/`）
 // - 静态资源 cache-first，提升离线可用性与加载速度
 
 const CACHE_NAME = `kairem-pwa-${version}`;
-const ASSETS = Array.from(new Set([...build, ...files, ...prerendered, '/']));
+const OFFLINE_URL = '/offline';
+const ASSETS = Array.from(new Set([...build, ...files, ...prerendered, '/', OFFLINE_URL]));
 
 self.addEventListener('install', (event) => {
 	event.waitUntil(
 		(async () => {
 			const cache = await caches.open(CACHE_NAME);
 			await cache.addAll(ASSETS);
-			await self.skipWaiting();
 		})()
 	);
+});
+
+self.addEventListener('message', (event) => {
+	const data = (event as MessageEvent).data as any;
+	if (!data || typeof data !== 'object') return;
+	if (data.type !== 'SKIP_WAITING') return;
+	event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
@@ -55,7 +62,7 @@ self.addEventListener('fetch', (event) => {
 		files.includes(url.pathname as any) ||
 		build.includes(url.pathname as any);
 
-	// 导航：network-first，离线回退到首页（应用壳）
+	// 导航：network-first，离线回退到离线提示页
 	if (request.mode === 'navigate') {
 		event.respondWith(
 			(async () => {
@@ -67,7 +74,7 @@ self.addEventListener('fetch', (event) => {
 				} catch {
 					const cached = await caches.match(request);
 					if (cached) return cached;
-					return (await caches.match('/')) || Response.error();
+					return (await caches.match(OFFLINE_URL)) || Response.error();
 				}
 			})()
 		);
